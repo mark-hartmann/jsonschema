@@ -1,0 +1,7 @@
+{
+  "$defs": {
+    "negativeOne": {
+      "const": -1
+    }
+  }
+}
