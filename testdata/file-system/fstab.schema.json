@@ -1,0 +1,14 @@
+{
+  "$id": "file:///testdata/file-system/fstab.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "https://json-schema.org/learn/file-system#referencing-entry",
+  "type": "object",
+  "required": [ "/" ],
+  "properties": {
+    "/": { "$ref": "file:///testdata/file-system/entry-schema.schema.json" }
+  },
+  "patternProperties": {
+    "^(/[^/]+)+$":  { "$ref": "file:///testdata/file-system/entry-schema.schema.json" }
+  },
+  "additionalProperties": false
+}

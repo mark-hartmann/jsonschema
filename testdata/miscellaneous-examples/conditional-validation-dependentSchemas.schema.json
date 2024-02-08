@@ -1,0 +1,29 @@
+{
+  "$id": "file:///testdata/miscellaneous-examples/conditional-validation-dependentSchemas.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "https://json-schema.org/learn/miscellaneous-examples#conditional-validation-with-dependentschemas",
+  "title": "Conditional Validation with dependentSchemas",
+  "type": "object",
+  "properties": {
+    "foo": {
+      "type": "boolean"
+    },
+    "propertiesCount": {
+      "type": "integer",
+      "minimum": 0
+    }
+  },
+  "dependentSchemas": {
+    "foo": {
+      "required": [
+        "propertiesCount"
+      ],
+      "properties": {
+        "propertiesCount": {
+          "minimum": 7
+        }
+      }
+    }
+  }
+}
+
