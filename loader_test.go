@@ -2,7 +2,6 @@ package jsonschema_test
 
 import (
 	"embed"
-	"encoding/json"
 	"errors"
 	. "jsonschema"
 	"net/url"
@@ -10,19 +9,19 @@ import (
 	"testing"
 )
 
-//go:embed testdata/embedded/*
-var schemas embed.FS
+//go:embed testdata/*
+var testdataFS embed.FS
 
 func TestNewEmbeddedLoader(t *testing.T) {
-	load := NewEmbeddedLoader(schemas)
+	load := NewEmbeddedLoader(testdataFS)
 
-	uri, _ := url.Parse("https://example.com/foo.json")
+	uri, _ := url.Parse("https://example.com/arrays.schema.json")
 	if _, err := load(uri); !errors.Is(err, UnsupportedURI) {
 		t.Logf("expected UnsupportedURI")
 		t.FailNow()
 	}
 
-	uri, _ = url.Parse("file:///testdata/embedded/foo.json")
+	uri, _ = url.Parse("file:///testdata/miscellaneous-examples/arrays.schema.json")
 	schema, err := load(uri)
 
 	if err != nil {
@@ -30,20 +29,43 @@ func TestNewEmbeddedLoader(t *testing.T) {
 		t.FailNow()
 	}
 
-	//goland:noinspection GoRedundantConversion
 	expected := &Schema{
-		Type: TypeSet{TypeArray},
-		Items: &Schema{
-			OneOf: []Schema{
-				{Ref: "#/$defs/uint8"},
-				{Ref: "file:///testdata/embedded/bar.json#/$defs/negativeOne"},
+		ID:          "file:///testdata/miscellaneous-examples/arrays.schema.json",
+		Schema:      "https://json-schema.org/draft/2020-12/schema",
+		Comment:     "https://json-schema.org/learn/miscellaneous-examples#arrays-of-things",
+		Description: "A representation of a person, company, organization, or place",
+		Type:        TypeSet{TypeObject},
+		Properties: map[string]Schema{
+			"fruits": {
+				Type: TypeSet{TypeArray},
+				Items: &Schema{
+					Type: TypeSet{TypeString},
+				},
+			},
+			"vegetables": {
+				Type: TypeSet{TypeArray},
+				Items: &Schema{
+					Ref: "#/$defs/veggie",
+				},
 			},
 		},
 		Defs: map[string]Schema{
-			"uint8": {
-				Type:    TypeSet{TypeInteger},
-				Minimum: ptr(json.Number("0")),
-				Maximum: ptr(json.Number("255")),
+			"veggie": {
+				Type: TypeSet{TypeObject},
+				Required: []string{
+					"veggieName",
+					"veggieLike",
+				},
+				Properties: map[string]Schema{
+					"veggieName": {
+						Type:        TypeSet{TypeString},
+						Description: "The name of the vegetable.",
+					},
+					"veggieLike": {
+						Type:        TypeSet{TypeBoolean},
+						Description: "Do I like this vegetable?",
+					},
+				},
 			},
 		},
 	}
@@ -54,13 +76,7 @@ func TestNewEmbeddedLoader(t *testing.T) {
 		t.FailNow()
 	}
 
-	uri, _ = url.Parse("file:///testdata/embedded/baz.txt")
-	if _, err = load(uri); err == nil {
-		t.Logf("expected error, got nil")
-		t.FailNow()
-	}
-
-	uri, _ = url.Parse("file:///testdata/embedded/buz.txt")
+	uri, _ = url.Parse("file:///testdata/unknown-file.txt")
 	if _, err = load(uri); err == nil {
 		t.Logf("expected error, got nil")
 		t.FailNow()
