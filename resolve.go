@@ -7,7 +7,10 @@ import (
 	"strings"
 )
 
-func ResolveReference(loader LoaderFunc, ref string, schema *Schema) (*Schema, error) {
+// ResolveReference resolves a JSON reference pointer against the provided Schema.
+// If the reference (or some node of it) points to an external URI, the loader is
+// used.
+func ResolveReference(loader LoaderFunc, ref string, schema, root *Schema) (*Schema, error) {
 	u, err := url.Parse(ref)
 	if err != nil {
 		return nil, fmt.Errorf("foo: failed to parse $ref URI: %v", err)
@@ -15,47 +18,35 @@ func ResolveReference(loader LoaderFunc, ref string, schema *Schema) (*Schema, e
 
 	var path []string
 
+	ignoreRef := false
 	switch {
 	case u.IsAbs():
 		if schema, err = loader(u); err != nil {
 			return nil, fmt.Errorf("foo: failed to load external schema at %q: %w",
 				u.String(), err)
 		}
+		root = schema
 		fallthrough
 	case u.Path == "":
+		// The URI contains no path, so we can assume it is relative to root, so [root]
+		// is now our [schema]. For example:
+		//
+		//   #/$defs/foo
+		//   file:///example/test.schema.json#properties/foo
 		path = getUnescapedPath(u.Fragment)
+		schema = root
 	case u.Path != "":
+		// The URI is not absolute and the JSON pointer is not relative to
+		// root, i.e. it's a relative pointer like "/properties/foo". This means
+		// neither [schema] nor [root] changes.
+		//
+		// Schema are treated as READONLY, i.e. we can't remove the $ref from schema, which
+		// is - if set - followed in [resolveRef], resulting in a stack overflow.
 		path = getUnescapedPath(u.Path)
+		ignoreRef = path == nil || isRelative(path)
 	}
 
-	return resolveRef(loader, path, 0, schema, schema, false)
-}
-
-// sideLoadSchema locates the reference pointer in schema. The references
-// can be relative, relative to root or external.
-func sideLoadSchema(loader LoaderFunc, root, schema *Schema) (*Schema, error) {
-	u, err := url.Parse(schema.Ref)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse $ref URI: %v", err)
-	}
-
-	// No external lookup required because $ref refers either to the schema
-	// itself or to its root. If $ref is relative, we set ignoreRef=true in
-	// order to prevent infinite side-loading loop.
-	if !u.IsAbs() && u.Path != "" {
-		path := getUnescapedPath(u.Path)
-		return resolveRef(loader, path, 0, root, schema, path == nil || isRelative(path))
-	}
-
-	next := root
-	if u.IsAbs() {
-		if next, err = loader(u); err != nil {
-			return nil, fmt.Errorf("failed to load external schema at %q: %w",
-				u.String(), err)
-		}
-	}
-
-	return ResolveReference(loader, u.Fragment, next)
+	return resolveRef(loader, path, 0, root, schema, ignoreRef)
 }
 
 func resolveRef(loader LoaderFunc, path []string, pos int, root, schema *Schema,
@@ -69,7 +60,7 @@ func resolveRef(loader LoaderFunc, path []string, pos int, root, schema *Schema,
 
 	if schema.Ref != "" /* && schema.Ref != "#" */ && !ignoreRef {
 		var err error
-		if schema, err = sideLoadSchema(loader, root, schema); err != nil {
+		if schema, err = ResolveReference(loader, schema.Ref, schema, root); err != nil {
 			return nil, fmt.Errorf("failed to side-load referenced schema: %w", err)
 		}
 	}

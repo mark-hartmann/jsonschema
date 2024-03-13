@@ -3,6 +3,7 @@ package jsonschema_test
 import (
 	"embed"
 	"encoding/json"
+	"fmt"
 	. "jsonschema"
 	"reflect"
 	"testing"
@@ -33,6 +34,7 @@ var defsSchema = &Schema{
 						{Ref: "file:///testdata/schema/aaa.schema.json#/items/oneOf/0"},
 						{Ref: "file:///testdata/schema/aaa.schema.json#/items/oneOf/1"},
 						{Ref: "file:///testdata/schema/aaa.schema.json#/items/oneOf/2"},
+						{Ref: "file:///testdata/schema/aaa.schema.json#/items/oneOf/3"},
 					},
 					Defs: map[string]Schema{
 						"null_schema": {
@@ -84,10 +86,11 @@ func TestResolveReference(t *testing.T) {
 	res := &Schema{}
 	_ = json.Unmarshal([]byte(defsSchema.String()), res)
 
+	loader := NewEmbeddedLoader(refSchemas)
+
 	for _, td := range tests {
 		t.Run(td.name, func(t *testing.T) {
-			loader := NewEmbeddedLoader(refSchemas)
-			actual, err := ResolveReference(loader, td.ref, td.in)
+			actual, err := ResolveReference(loader, td.ref, td.in, td.in)
 
 			if err != nil && td.out != nil {
 				t.Logf("got err:\n %v", err)
@@ -109,4 +112,9 @@ func TestResolveReference(t *testing.T) {
 			}
 		})
 	}
+
+	// out of context
+	rel := defsSchema.Defs["bar"]
+	fmt.Println(ResolveReference(loader, "#/$defs/foo", &rel, defsSchema))
+
 }
