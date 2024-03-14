@@ -31,10 +31,11 @@ var defsSchema = &Schema{
 						{Ref: "#"},
 						{Ref: "#/$defs/bar/properties/a"},
 						{Ref: "#/$defs/bar/properties/b/$defs/null_schema/$defs/x"},
-						{Ref: "file:///testdata/schema/aaa.schema.json#/items/oneOf/0"},
-						{Ref: "file:///testdata/schema/aaa.schema.json#/items/oneOf/1"},
-						{Ref: "file:///testdata/schema/aaa.schema.json#/items/oneOf/2"},
-						{Ref: "file:///testdata/schema/aaa.schema.json#/items/oneOf/3"},
+
+						// external
+						{Ref: "file:///testdata/file-system/entry-schema.schema.json#/properties/storage/oneOf/0"},
+						{Ref: "file:///testdata/miscellaneous-examples/arrays.schema.json#/properties/vegetables"},
+						{Ref: "file:///testdata/miscellaneous-examples/complex-object.schema.json#/properties/name"},
 					},
 					Defs: map[string]Schema{
 						"null_schema": {
@@ -60,7 +61,7 @@ var defsSchema = &Schema{
 	},
 }
 
-//go:embed testdata/schema/*
+//go:embed testdata/*
 var refSchemas embed.FS
 
 func TestResolveReference(t *testing.T) {
@@ -78,9 +79,23 @@ func TestResolveReference(t *testing.T) {
 		{name: "invalid ptr", ref: "/foo/", in: defsSchema, out: nil},
 		{name: "escaped slash in ptr", ref: "/$defs/bu~1z", in: defsSchema, out: &Schema{}},
 		{name: "escaped tilde in ptr", ref: "/$defs/ba~0z", in: defsSchema, out: &Schema{Type: TypeSet{TypeBoolean}}},
-		{name: "external ref", ref: "#/$defs/bar/properties/b/anyOf/6", in: defsSchema, out: &Schema{Type: TypeSet{TypeInteger}, Minimum: ptr(json.Number("8"))}},
-		{name: "external ref", ref: "#/$defs/bar/properties/b/anyOf/7", in: defsSchema, out: &Schema{Type: TypeSet{TypeNull}}},
-		{name: "external ref", ref: "#/$defs/bar/properties/b/anyOf/8", in: defsSchema, out: &Schema{Type: TypeSet{TypeArray}}},
+
+		{name: "external ref", ref: "#/$defs/bar/properties/b/anyOf/6", in: defsSchema, out: &Schema{
+			Properties: map[string]Schema{
+				"type":   {Enum: []any{"disk"}},
+				"device": {Type: []Type{TypeString}, Pattern: ptr("^/dev/[^/]+(/[^/]+)*$")},
+			},
+			Required:             []string{"type", "device"},
+			AdditionalProperties: &False,
+		}},
+
+		{name: "external ref", ref: "#/$defs/bar/properties/b/anyOf/7", in: defsSchema, out: &Schema{
+			Type: TypeSet{TypeArray},
+			Items: &Schema{
+				Ref: "#/$defs/veggie",
+			},
+		}},
+		{name: "external ref", ref: "#/$defs/bar/properties/b/anyOf/8", in: defsSchema, out: &Schema{Type: TypeSet{TypeString}}},
 	}
 
 	res := &Schema{}

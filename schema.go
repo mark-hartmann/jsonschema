@@ -36,6 +36,11 @@ func (s *TypeSet) UnmarshalJSON(b []byte) error {
 	}
 }
 
+var (
+	True  = Schema{}
+	False = Schema{Not: []Schema{True}}
+)
+
 type Schema struct {
 	// Core
 	Schema     string            `json:"$schema,omitempty"`
