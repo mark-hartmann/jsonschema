@@ -38,7 +38,7 @@ func (s *TypeSet) UnmarshalJSON(b []byte) error {
 
 var (
 	True  = Schema{}
-	False = Schema{Not: []Schema{True}}
+	False = Schema{Not: &Schema{}}
 )
 
 type Schema struct {
@@ -55,7 +55,7 @@ type Schema struct {
 	AllOf []Schema `json:"allOf,omitempty"`
 	AnyOf []Schema `json:"anyOf,omitempty"`
 	OneOf []Schema `json:"oneOf,omitempty"`
-	Not   []Schema `json:"not,omitempty"`
+	Not   *Schema  `json:"not,omitempty"`
 
 	// Applying subschemas conditionally
 	If               *Schema           `json:"if,omitempty"`
@@ -123,9 +123,7 @@ func (s *Schema) UnmarshalJSON(b []byte) error {
 	if bytes.Equal(b, []byte("true")) {
 		*s = Schema{}
 	} else if bytes.Equal(b, []byte("false")) {
-		*s = Schema{Not: []Schema{
-			{},
-		}}
+		*s = Schema{Not: &Schema{}}
 	} else {
 		type rawSchema Schema
 		var out rawSchema
@@ -137,29 +135,85 @@ func (s *Schema) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-func (s *Schema) IsTrue() bool {
-	return len(s.AllOf) == 0 &&
-		len(s.AnyOf) == 0 &&
-		len(s.OneOf) == 0 &&
-		len(s.Not) == 0 &&
-		s.If == nil &&
-		s.Then == nil &&
-		s.Else == nil &&
-		len(s.DependentSchemas) == 0 &&
-		len(s.PrefixItems) == 0 &&
-		s.Items == nil &&
-		s.Contains == nil &&
-		len(s.Properties) == 0 &&
-		len(s.PatternProperties) == 0 &&
-		s.AdditionalProperties == nil &&
-		s.PropertyNames == nil
+func (s *Schema) MarshalJSON() ([]byte, error) {
+	if s.IsFalse() {
+		return []byte("false"), nil
+	} else if s.IsTrue() {
+		return []byte("true"), nil
+	} else {
+		type rawSchema Schema
+		out := rawSchema(*s)
+		return json.Marshal(out)
+	}
 }
 
+func (s *Schema) hasMetadata() bool {
+	return s.Schema != "" ||
+		len(s.Vocabulary) > 0 ||
+		s.ID != "" ||
+		s.Ref != "" ||
+		s.DynamicRef != "" ||
+		len(s.Defs) > 0 ||
+		s.Comment != "" ||
+		s.Title != "" ||
+		s.Description != "" ||
+		s.Default != nil ||
+		s.Deprecated != nil ||
+		s.ReadOnly != nil ||
+		s.WriteOnly != nil ||
+		len(s.Examples) > 0
+}
+
+func (s *Schema) hasApplicators() bool {
+	return len(s.AllOf) != 0 ||
+		len(s.AnyOf) != 0 ||
+		len(s.OneOf) != 0 ||
+		s.Not != nil ||
+		s.If != nil ||
+		s.Then != nil ||
+		s.Else != nil ||
+		len(s.DependentSchemas) != 0 ||
+		len(s.PrefixItems) != 0 ||
+		s.Items != nil ||
+		s.Contains != nil ||
+		len(s.Properties) != 0 ||
+		len(s.PatternProperties) != 0 ||
+		s.AdditionalProperties != nil ||
+		s.PropertyNames != nil
+}
+
+func (s *Schema) hasValidators() bool {
+	return s.Type != nil ||
+		s.Enum != nil ||
+		s.Const != nil ||
+		s.MultipleOf != nil ||
+		s.Maximum != nil ||
+		s.ExclusiveMaximum != nil ||
+		s.Minimum != nil ||
+		s.ExclusiveMinimum != nil ||
+		s.MaxLength != nil ||
+		s.MinLength != nil ||
+		s.UniqueItems != nil ||
+		s.MaxContains != nil ||
+		s.MinContains != nil ||
+		s.MaxProperties != nil ||
+		s.MinProperties != nil ||
+		s.Required != nil ||
+		s.DependentRequired != nil
+}
+
+// IsTrue will return true if the Schema is empty. Any annotations or
+// keywords mean that the schema is not considered empty.
+//
+//	Schema{}                  // true
+//	Schema{Default: true}     // false
+//	Schema{AllOf: Schema[{}]} // false
+func (s *Schema) IsTrue() bool {
+	return !s.hasMetadata() && !s.hasApplicators() && !s.hasValidators()
+}
+
+// IsFalse will return true if Schema.Not contains a boolean schema
+// equal to true.
 func (s *Schema) IsFalse() bool {
-	for _, not := range s.Not {
-		if not.IsTrue() {
-			return true
-		}
-	}
-	return false
+	return s.Not != nil && s.Not.IsTrue()
 }

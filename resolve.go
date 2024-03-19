@@ -8,9 +8,9 @@ import (
 )
 
 // ResolveReference resolves a JSON reference pointer against the provided Schema.
-// If the reference (or some node of it) points to an external URI, the loader is
+// If the reference (or some node of it) points to an external URI, the loaders is
 // used.
-func ResolveReference(loader LoaderFunc, ref string, schema, root *Schema) (*Schema, error) {
+func ResolveReference(loader Loader, ref string, schema, root *Schema) (*Schema, error) {
 	u, err := url.Parse(ref)
 	if err != nil {
 		return nil, fmt.Errorf("foo: failed to parse $ref URI: %v", err)
@@ -21,7 +21,7 @@ func ResolveReference(loader LoaderFunc, ref string, schema, root *Schema) (*Sch
 	ignoreRef := false
 	switch {
 	case u.IsAbs():
-		if schema, err = loader(u); err != nil {
+		if schema, err = loader.Load(u); err != nil {
 			return nil, fmt.Errorf("foo: failed to load external schema at %q: %w",
 				u.String(), err)
 		}
@@ -49,7 +49,7 @@ func ResolveReference(loader LoaderFunc, ref string, schema, root *Schema) (*Sch
 	return resolveRef(loader, path, 0, root, schema, ignoreRef)
 }
 
-func resolveRef(loader LoaderFunc, path []string, pos int, root, schema *Schema,
+func resolveRef(loader Loader, path []string, pos int, root, schema *Schema,
 	ignoreRef bool) (*Schema, error) {
 
 	// Return if the current schema is not set, or we reached the end of
@@ -73,7 +73,7 @@ func resolveRef(loader LoaderFunc, path []string, pos int, root, schema *Schema,
 	switch segment {
 	case "#":
 		return resolveRef(loader, path, pos+1, root, root, false)
-	case "allOf", "anyOf", "oneOf", "not", "prefixItems":
+	case "allOf", "anyOf", "oneOf", "prefixItems":
 		if len(path[pos:]) == 1 {
 			return nil, fmt.Errorf("resolveRef: missing array index")
 		}
@@ -88,8 +88,6 @@ func resolveRef(loader LoaderFunc, path []string, pos int, root, schema *Schema,
 			col = schema.AnyOf
 		case "oneOf":
 			col = schema.OneOf
-		case "not":
-			col = schema.Not
 		case "prefixItems":
 			col = schema.PrefixItems
 		}
@@ -129,6 +127,8 @@ func resolveRef(loader LoaderFunc, path []string, pos int, root, schema *Schema,
 
 		schema = &s
 		return resolveRef(loader, path, pos+2, root, schema, false)
+	case "not":
+		return resolveRef(loader, path, pos+1, root, schema.Not, false)
 	case "if":
 		return resolveRef(loader, path, pos+1, root, schema.If, false)
 	case "then":

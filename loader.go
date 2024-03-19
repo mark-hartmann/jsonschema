@@ -9,64 +9,23 @@ import (
 	"strings"
 )
 
-// UnsupportedURI is returned by a LoaderFunc to signal that the loader function
-// is unable so process the URI.
+// UnsupportedURI is returned by a Loader to signal that the loaders is
+// unable so process the URI.
 var UnsupportedURI = errors.New("unsupported URI")
+
+type Loader interface {
+	Load(uri *url.URL) (*Schema, error)
+}
 
 type LoaderFunc func(uri *url.URL) (*Schema, error)
 
-type Loader struct {
-	loaders []LoaderFunc
-	schemas map[string]*Schema
+func (f LoaderFunc) Load(uri *url.URL) (*Schema, error) {
+	return f(uri)
 }
 
-func (l Loader) Load(uri *url.URL) (*Schema, error) {
-
-	f := uri.Fragment
-	uri.Fragment = ""
-	key := uri.String()
-	uri.Fragment = f
-
-	if schema, ok := l.schemas[key]; ok {
-		return schema, nil
-	}
-
-	for _, fn := range l.loaders {
-		schema, err := fn(uri)
-		if err != nil {
-			if errors.Is(err, UnsupportedURI) {
-				continue
-			}
-			return nil, fmt.Errorf("jsonschema.Loader: failed to retrieve schema: %w", err)
-		}
-
-		l.schemas[key] = schema
-		break
-	}
-
-	return l.schemas[key], nil
-}
-
-type LoaderOption func(*Loader)
-
-func WithLoader(loader LoaderFunc) LoaderOption {
-	return func(l *Loader) {
-		l.loaders = append(l.loaders, loader)
-	}
-}
-
-func NewLoader(opts ...LoaderOption) *Loader {
-	l := &Loader{schemas: map[string]*Schema{}}
-	for _, opt := range opts {
-		opt(l)
-	}
-
-	return l
-}
-
-// NewEmbeddedLoader returns a LoaderFunc that searches fs for the URI.
-func NewEmbeddedLoader(fs embed.FS) LoaderFunc {
-	return func(uri *url.URL) (*Schema, error) {
+// NewEmbeddedLoader returns a Loader that searches fs for the URI.
+func NewEmbeddedLoader(fs embed.FS) Loader {
+	return LoaderFunc(func(uri *url.URL) (*Schema, error) {
 		if uri.Scheme != "file" {
 			return nil, UnsupportedURI
 		}
@@ -82,5 +41,5 @@ func NewEmbeddedLoader(fs embed.FS) LoaderFunc {
 		}
 
 		return s, nil
-	}
+	})
 }
