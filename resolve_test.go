@@ -1,49 +1,50 @@
 package jsonschema_test
 
 import (
-	"embed"
 	"fmt"
 	. "jsonschema"
 	"reflect"
 	"testing"
 )
 
-type test struct {
-	name, ref string
-	in, out   *Schema
-}
+func TestResolveReference(t *testing.T) {
+	type test struct {
+		name, ref string
+		in, out   *Schema
+	}
 
-var defsSchema = &Schema{
-	Defs: map[string]Schema{
-		"foo": {
-			Type: TypeSet{TypeBoolean},
-		},
-		"bar": {
-			Type: TypeSet{TypeObject},
-			Properties: map[string]Schema{
-				"a": {Type: TypeSet{TypeString}},
-				"b": {
-					AnyOf: []Schema{
-						{Ref: "#/$defs/foo"},
-						{Ref: "/$defs/null_schema"}, // illegal, $defs not defined
-						{Ref: "/"},                  // illegal, infinite loop
-						{Ref: "#"},
-						{Ref: "#/$defs/bar/properties/a"},
-						{Ref: "#/$defs/bar/properties/b/$defs/null_schema/$defs/x"},
+	var defsSchema = &Schema{
+		Defs: map[string]Schema{
+			"foo": {
+				Type: TypeSet{TypeBoolean},
+			},
+			"bar": {
+				Type: TypeSet{TypeObject},
+				Properties: map[string]Schema{
+					"a": {Type: TypeSet{TypeString}},
+					"b": {
+						AnyOf: []Schema{
+							{Ref: "#/$defs/foo"},
+							{Ref: "/$defs/null_schema"}, // illegal, $defs not defined
+							{Ref: "/"},                  // illegal, infinite loop
+							{Ref: "#"},
+							{Ref: "#/$defs/bar/properties/a"},
+							{Ref: "#/$defs/bar/properties/b/$defs/null_schema/$defs/x"},
 
-						// external
-						{Ref: "file:///testdata/file-system/entry-schema.schema.json#/properties/storage/oneOf/0"},
-						{Ref: "file:///testdata/miscellaneous-examples/arrays.schema.json#/properties/vegetables"},
-						{Ref: "file:///testdata/miscellaneous-examples/complex-object.schema.json#/properties/name"},
-					},
-					Defs: map[string]Schema{
-						"null_schema": {
-							Type: TypeSet{TypeNull},
-							Defs: map[string]Schema{
-								"x": {
-									Type: TypeSet{TypeArray},
-									Items: &Schema{
-										Type: TypeSet{TypeNumber},
+							// external
+							{Ref: "file:///testdata/file-system/entry-schema.schema.json#/properties/storage/oneOf/0"},
+							{Ref: "file:///testdata/miscellaneous-examples/arrays.schema.json#/properties/vegetables"},
+							{Ref: "file:///testdata/miscellaneous-examples/complex-object.schema.json#/properties/name"},
+						},
+						Defs: map[string]Schema{
+							"null_schema": {
+								Type: TypeSet{TypeNull},
+								Defs: map[string]Schema{
+									"x": {
+										Type: TypeSet{TypeArray},
+										Items: &Schema{
+											Type: TypeSet{TypeNumber},
+										},
 									},
 								},
 							},
@@ -51,19 +52,14 @@ var defsSchema = &Schema{
 					},
 				},
 			},
+			"baz": {
+				Ref: "#/$defs/bar",
+			},
+			"bu/z": {},
+			"ba~z": {Type: TypeSet{TypeBoolean}},
 		},
-		"baz": {
-			Ref: "#/$defs/bar",
-		},
-		"bu/z": {},
-		"ba~z": {Type: TypeSet{TypeBoolean}},
-	},
-}
+	}
 
-//go:embed testdata/*
-var refSchemas embed.FS
-
-func TestResolveReference(t *testing.T) {
 	var tests = []test{
 		{name: "self abs", ref: "#", in: defsSchema, out: defsSchema},
 		{name: "self rel", ref: "/", in: defsSchema, out: defsSchema},
@@ -98,7 +94,7 @@ func TestResolveReference(t *testing.T) {
 	}
 
 	res := func() *Schema { c := Copy(*defsSchema); return &c }()
-	loader := NewEmbeddedLoader(refSchemas)
+	loader := NewEmbeddedLoader(testdataFS)
 
 	for _, td := range tests {
 		t.Run(td.name, func(t *testing.T) {
