@@ -2,7 +2,6 @@ package jsonschema_test
 
 import (
 	"embed"
-	"encoding/json"
 	"fmt"
 	. "jsonschema"
 	"reflect"
@@ -98,9 +97,7 @@ func TestResolveReference(t *testing.T) {
 		{name: "external ref", ref: "#/$defs/bar/properties/b/anyOf/8", in: defsSchema, out: &Schema{Type: TypeSet{TypeString}}},
 	}
 
-	res := &Schema{}
-	_ = json.Unmarshal([]byte(defsSchema.String()), res)
-
+	res := func() *Schema { c := Copy(*defsSchema); return &c }()
 	loader := NewEmbeddedLoader(refSchemas)
 
 	for _, td := range tests {
