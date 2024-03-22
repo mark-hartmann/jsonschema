@@ -12,6 +12,7 @@ var refTests = map[string]struct {
 	"rel self":                   {ref: "/"},
 	"root":                       {ref: "#/"},
 	"anyOf with index":           {ref: "#/anyOf/0"},
+	"not":                        {ref: "/not"},
 	"if then":                    {ref: "/if/then"},
 	"if then with slash":         {ref: "/if/then/"},
 	"properties map key":         {ref: "#/properties/foo"},

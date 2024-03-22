@@ -31,7 +31,7 @@ func ValidateReferencePointer(ref string) error {
 func schemaSegmentValidator(i int, segments []string) error {
 	segment := segments[i]
 	switch segment {
-	case "allOf", "anyOf", "oneOf", "not", "prefixItems":
+	case "allOf", "anyOf", "oneOf", "prefixItems":
 		fallthrough
 	case "$defs", "dependentSchemas", "properties", "patternProperties":
 		if i >= len(segments)-1 {
@@ -39,7 +39,7 @@ func schemaSegmentValidator(i int, segments []string) error {
 		}
 
 		return nil
-	case "if", "then", "else", "items", "contains", "additionalProperties", "propertyNames":
+	case "not", "if", "then", "else", "items", "contains", "additionalProperties", "propertyNames":
 		return nil
 	default:
 		if i <= 0 {
@@ -50,7 +50,7 @@ func schemaSegmentValidator(i int, segments []string) error {
 		switch prev {
 		case "$defs", "dependentSchemas", "properties", "patternProperties":
 			return nil
-		case "allOf", "anyOf", "oneOf", "not", "prefixItems":
+		case "allOf", "anyOf", "oneOf", "prefixItems":
 			r := []rune(segment)
 			if len(r) == 1 && r[0] == '0' {
 				return nil
