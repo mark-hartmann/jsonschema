@@ -49,26 +49,12 @@ func ValidateJSONPointerFunc(pointer string, fn func(int, []string) error) error
 	path := strings.Split(pointer[1:], "/")
 
 	for i, segment := range path {
-		if len(segment) == 0 {
-			if fn != nil {
-				if err := fn(i, path); err != nil {
-					return err
-				}
-			}
-			continue
-		}
-
 		token := []rune(segment)
 		for j := 0; j < len(token); j++ {
 			// A reference token is *(unescaped / escaped) where unescaped is any
 			// of (0x00-2E / 0x30-7D / 0x7F-10FFFF), practically every code point
 			// except ~ and /, both of which are covered.
 			if token[j] != '~' || (j < len(token)-1 && (token[j+1] == '0' || token[j+1] == '1')) {
-				if fn != nil {
-					if err := fn(i, path); err != nil {
-						return err
-					}
-				}
 				continue
 			}
 
@@ -78,6 +64,12 @@ func ValidateJSONPointerFunc(pointer string, fn func(int, []string) error) error
 			}
 
 			return &SegmentError{Seg: segment, Pos: i, Err: EscapeSequenceError(s)}
+		}
+
+		if fn != nil {
+			if err := fn(i, path); err != nil {
+				return err
+			}
 		}
 	}
 

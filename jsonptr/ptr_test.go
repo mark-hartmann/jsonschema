@@ -39,7 +39,7 @@ func TestValidateJSONPointerFunc(t *testing.T) {
 	}
 
 	for _, data := range ptrTests {
-		t.Run("JSON pointer", func(t *testing.T) {
+		t.Run(data.ptr, func(t *testing.T) {
 			err := ValidateJSONPointerFunc(data.ptr, nil)
 
 			if data.err == "" && err != nil {
@@ -52,5 +52,16 @@ func TestValidateJSONPointerFunc(t *testing.T) {
 				t.FailNow()
 			}
 		})
+	}
+
+	c := make(map[string]int)
+	_ = ValidateJSONPointerFunc("/foo/bar//baz", func(i int, segments []string) error {
+		c[segments[i]] += 1
+		return nil
+	})
+
+	if c["foo"] != 1 || c["bar"] != 1 || c[""] != 1 || c["baz"] != 1 {
+		t.Logf("expected fn to be called once per segment, was %v: ", c)
+		t.FailNow()
 	}
 }
