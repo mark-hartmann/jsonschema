@@ -44,8 +44,20 @@ func ValidateJSONPointerFunc(pointer string, fn func(int, []string) error) error
 		return InvalidJSONPointerError(pointer)
 	}
 
-	path := strings.Split(strings.TrimPrefix(pointer, "/"), "/")
+	// The first char must be a "/", so we ignore the first occurrence.
+	// Following "/" are kept, as "//" is a valid JSON pointer.
+	path := strings.Split(pointer[1:], "/")
+
 	for i, segment := range path {
+		if len(segment) == 0 {
+			if fn != nil {
+				if err := fn(i, path); err != nil {
+					return err
+				}
+			}
+			continue
+		}
+
 		token := []rune(segment)
 		for j := 0; j < len(token); j++ {
 			// A reference token is *(unescaped / escaped) where unescaped is any
