@@ -1,6 +1,7 @@
 package jsonschema
 
 import (
+	"context"
 	"embed"
 	"encoding/json"
 	"errors"
@@ -14,18 +15,18 @@ import (
 var UnsupportedURI = errors.New("unsupported URI")
 
 type Loader interface {
-	Load(uri *url.URL) (*Schema, error)
+	Load(ctx context.Context, uri *url.URL) (*Schema, error)
 }
 
-type LoaderFunc func(uri *url.URL) (*Schema, error)
+type LoaderFunc func(ctx context.Context, uri *url.URL) (*Schema, error)
 
-func (f LoaderFunc) Load(uri *url.URL) (*Schema, error) {
-	return f(uri)
+func (f LoaderFunc) Load(ctx context.Context, uri *url.URL) (*Schema, error) {
+	return f(ctx, uri)
 }
 
 // NewEmbeddedLoader returns a Loader that searches fs for the URI.
 func NewEmbeddedLoader(fs embed.FS) Loader {
-	return LoaderFunc(func(uri *url.URL) (*Schema, error) {
+	return LoaderFunc(func(_ context.Context, uri *url.URL) (*Schema, error) {
 		if uri.Scheme != "file" {
 			return nil, UnsupportedURI
 		}

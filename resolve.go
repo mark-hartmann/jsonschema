@@ -1,6 +1,7 @@
 package jsonschema
 
 import (
+	"context"
 	"fmt"
 	"net/url"
 	"strconv"
@@ -10,7 +11,11 @@ import (
 // ResolveReference resolves a JSON reference pointer against the provided Schema.
 // If the reference (or some node of it) points to an external URI, the loaders is
 // used.
-func ResolveReference(loader Loader, ref string, schema, root *Schema) (*Schema, error) {
+func ResolveReference(ctx context.Context, loader Loader, ref string, schema, root *Schema) (*Schema, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
 	u, err := url.Parse(ref)
 	if err != nil {
 		return nil, fmt.Errorf("foo: failed to parse $ref URI: %v", err)
@@ -21,7 +26,7 @@ func ResolveReference(loader Loader, ref string, schema, root *Schema) (*Schema,
 	ignoreRef := false
 	switch {
 	case u.IsAbs():
-		if schema, err = loader.Load(u); err != nil {
+		if schema, err = loader.Load(ctx, u); err != nil {
 			return nil, fmt.Errorf("foo: failed to load external schema at %q: %w",
 				u.String(), err)
 		}
@@ -46,10 +51,10 @@ func ResolveReference(loader Loader, ref string, schema, root *Schema) (*Schema,
 		ignoreRef = path == nil || isRelative(path)
 	}
 
-	return resolveRef(loader, path, 0, root, schema, ignoreRef)
+	return resolveRef(ctx, loader, path, 0, root, schema, ignoreRef)
 }
 
-func resolveRef(loader Loader, path []string, pos int, root, schema *Schema,
+func resolveRef(ctx context.Context, loader Loader, path []string, pos int, root, schema *Schema,
 	ignoreRef bool) (*Schema, error) {
 
 	// Return if the current schema is not set, or we reached the end of
@@ -60,7 +65,7 @@ func resolveRef(loader Loader, path []string, pos int, root, schema *Schema,
 
 	if schema.Ref != "" /* && schema.Ref != "#" */ && !ignoreRef {
 		var err error
-		if schema, err = ResolveReference(loader, schema.Ref, schema, root); err != nil {
+		if schema, err = ResolveReference(ctx, loader, schema.Ref, schema, root); err != nil {
 			return nil, fmt.Errorf("failed to side-load referenced schema: %w", err)
 		}
 	}
@@ -72,7 +77,7 @@ func resolveRef(loader Loader, path []string, pos int, root, schema *Schema,
 	segment := path[pos]
 	switch segment {
 	case "#":
-		return resolveRef(loader, path, pos+1, root, root, false)
+		return resolveRef(ctx, loader, path, pos+1, root, root, false)
 	case "allOf", "anyOf", "oneOf", "prefixItems":
 		if len(path[pos:]) == 1 {
 			return nil, fmt.Errorf("resolveRef: missing array index")
@@ -99,7 +104,7 @@ func resolveRef(loader Loader, path []string, pos int, root, schema *Schema,
 			return nil, fmt.Errorf("resolveRef: index out of bounds %q", nextSegment)
 		}
 
-		return resolveRef(loader, path, pos+2, root, &col[i], false)
+		return resolveRef(ctx, loader, path, pos+2, root, &col[i], false)
 	case "$defs", "dependentSchemas", "properties", "patternProperties":
 		if len(path[pos:]) == 1 {
 			return nil, fmt.Errorf("resolveRef: missing object key at %q", path[:pos+1])
@@ -126,23 +131,23 @@ func resolveRef(loader Loader, path []string, pos int, root, schema *Schema,
 		}
 
 		schema = &s
-		return resolveRef(loader, path, pos+2, root, schema, false)
+		return resolveRef(ctx, loader, path, pos+2, root, schema, false)
 	case "not":
-		return resolveRef(loader, path, pos+1, root, schema.Not, false)
+		return resolveRef(ctx, loader, path, pos+1, root, schema.Not, false)
 	case "if":
-		return resolveRef(loader, path, pos+1, root, schema.If, false)
+		return resolveRef(ctx, loader, path, pos+1, root, schema.If, false)
 	case "then":
-		return resolveRef(loader, path, pos+1, root, schema.Then, false)
+		return resolveRef(ctx, loader, path, pos+1, root, schema.Then, false)
 	case "else":
-		return resolveRef(loader, path, pos+1, root, schema.Else, false)
+		return resolveRef(ctx, loader, path, pos+1, root, schema.Else, false)
 	case "items":
-		return resolveRef(loader, path, pos+1, root, schema.Items, false)
+		return resolveRef(ctx, loader, path, pos+1, root, schema.Items, false)
 	case "contains":
-		return resolveRef(loader, path, pos+1, root, schema.Contains, false)
+		return resolveRef(ctx, loader, path, pos+1, root, schema.Contains, false)
 	case "additionalProperties":
-		return resolveRef(loader, path, pos+1, root, schema.AdditionalProperties, false)
+		return resolveRef(ctx, loader, path, pos+1, root, schema.AdditionalProperties, false)
 	case "propertyNames":
-		return resolveRef(loader, path, pos+1, root, schema.PropertyNames, false)
+		return resolveRef(ctx, loader, path, pos+1, root, schema.PropertyNames, false)
 	}
 
 	return nil, fmt.Errorf("invalid path: unknown segment %q at %q", segment, path[:pos])

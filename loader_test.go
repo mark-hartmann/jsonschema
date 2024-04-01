@@ -16,13 +16,13 @@ func TestNewEmbeddedLoader(t *testing.T) {
 	loader := NewEmbeddedLoader(testdataFS)
 
 	uri, _ := url.Parse("https://example.com/arrays.schema.json")
-	if _, err := loader.Load(uri); !errors.Is(err, UnsupportedURI) {
+	if _, err := loader.Load(nil, uri); !errors.Is(err, UnsupportedURI) {
 		t.Logf("expected UnsupportedURI")
 		t.FailNow()
 	}
 
 	uri, _ = url.Parse("file:///testdata/miscellaneous-examples/arrays.schema.json")
-	schema, err := loader.Load(uri)
+	schema, err := loader.Load(nil, uri)
 
 	if err != nil {
 		t.Logf("expected schema, got %s", err)
@@ -77,7 +77,7 @@ func TestNewEmbeddedLoader(t *testing.T) {
 	}
 
 	uri, _ = url.Parse("file:///testdata/unknown-file.txt")
-	if _, err = loader.Load(uri); err == nil {
+	if _, err = loader.Load(nil, uri); err == nil {
 		t.Logf("expected error, got nil")
 		t.FailNow()
 	}

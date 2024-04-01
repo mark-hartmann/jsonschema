@@ -1,7 +1,6 @@
 package jsonschema_test
 
 import (
-	"fmt"
 	. "jsonschema"
 	"reflect"
 	"testing"
@@ -98,7 +97,7 @@ func TestResolveReference(t *testing.T) {
 
 	for _, td := range tests {
 		t.Run(td.name, func(t *testing.T) {
-			actual, err := ResolveReference(loader, td.ref, td.in, td.in)
+			actual, err := ResolveReference(nil, loader, td.ref, td.in, td.in)
 
 			if err != nil && td.out != nil {
 				t.Logf("got err:\n %v", err)
@@ -120,9 +119,4 @@ func TestResolveReference(t *testing.T) {
 			}
 		})
 	}
-
-	// out of context
-	rel := defsSchema.Defs["bar"]
-	fmt.Println(ResolveReference(loader, "#/$defs/foo", &rel, defsSchema))
-
 }
