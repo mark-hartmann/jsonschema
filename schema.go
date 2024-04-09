@@ -47,6 +47,7 @@ type Schema struct {
 	Vocabulary map[string]bool   `json:"$vocabulary,omitempty"`
 	ID         string            `json:"$id,omitempty"`
 	Ref        string            `json:"$ref,omitempty"`
+	Anchor     string            `json:"$anchor,omitempty"`
 	DynamicRef string            `json:"$dynamicRef,omitempty"`
 	Defs       map[string]Schema `json:"$defs,omitempty"`
 	Comment    string            `json:"$comment,omitempty"`
@@ -152,6 +153,7 @@ func (s *Schema) hasMetadata() bool {
 		len(s.Vocabulary) > 0 ||
 		s.ID != "" ||
 		s.Ref != "" ||
+		s.Anchor != "" ||
 		s.DynamicRef != "" ||
 		len(s.Defs) > 0 ||
 		s.Comment != "" ||

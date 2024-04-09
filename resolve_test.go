@@ -1,10 +1,78 @@
 package jsonschema_test
 
 import (
+	"context"
 	. "jsonschema"
+	"net/url"
 	"reflect"
 	"testing"
 )
+
+func TestComputeIdentifiers(t *testing.T) {
+	loader := NewEmbeddedLoader(testdataFS)
+
+	uri, _ := url.Parse("file:///testdata/miscellaneous-examples/schema-id-examples.schema.json")
+	schema, _ := loader.Load(context.Background(), uri)
+
+	m, _ := ComputeIdentifiers(*schema)
+
+	tests := map[string]Identifiers{
+		"/$defs/A": {
+			BaseURI:                 "https://example.com/root.json",
+			CanonResourcePlainURI:   "https://example.com/root.json#foo",
+			CanonResourcePointerURI: "https://example.com/root.json#/$defs/A",
+		},
+		"/$defs/B": {
+			BaseURI:                 "https://example.com/other.json",
+			CanonResourcePointerURI: "https://example.com/other.json#",
+		},
+		"/$defs/C": {
+			BaseURI:                 "urn:uuid:ee564b8a-7a87-4125-8c96-e9f123d6766f",
+			CanonResourcePointerURI: "urn:uuid:ee564b8a-7a87-4125-8c96-e9f123d6766f#",
+		},
+		"/$defs/B/$defs/X": {
+			BaseURI:                 "https://example.com/other.json",
+			CanonResourcePlainURI:   "https://example.com/other.json#bar",
+			CanonResourcePointerURI: "https://example.com/other.json#/$defs/X",
+		},
+		"/$defs/B/$defs/Y": {
+			BaseURI:                 "https://example.com/t/inner.json",
+			CanonResourcePlainURI:   "https://example.com/t/inner.json#bar",
+			CanonResourcePointerURI: "https://example.com/t/inner.json#",
+		},
+		"/$defs/B/$defs/Z": {
+			BaseURI:                 "https://example.com/z.json",
+			CanonResourcePointerURI: "https://example.com/z.json#",
+		},
+		"/$defs/B/$defs/Z/allOf/0": {
+			BaseURI:                 "https://example.com/z.json",
+			CanonResourcePlainURI:   "https://example.com/z.json#foo",
+			CanonResourcePointerURI: "https://example.com/z.json#/allOf/0",
+		},
+		"/$defs/B/$defs/Z/allOf/0/$defs/_": {
+			BaseURI:                 "https://example.com/z.json",
+			CanonResourcePlainURI:   "https://example.com/z.json#bar",
+			CanonResourcePointerURI: "https://example.com/z.json#/allOf/0/$defs/_",
+		},
+	}
+
+	if len(tests) != len(m) {
+		t.Errorf("mismatching lengths")
+		t.Errorf("need %d", len(tests))
+		t.Errorf("have %d", len(m))
+		t.FailNow()
+	}
+
+	for p, testData := range tests {
+		n, ok := m[p]
+		if !ok {
+			t.Errorf("%s not found", p)
+		} else if !reflect.DeepEqual(n, testData) {
+			t.Errorf("%s: need %+v", p, testData)
+			t.Errorf("%s: have %+v", p, n)
+		}
+	}
+}
 
 func TestResolveReference(t *testing.T) {
 	type test struct {
@@ -33,7 +101,7 @@ func TestResolveReference(t *testing.T) {
 							// external
 							{Ref: "file:///testdata/file-system/entry-schema.schema.json#/properties/storage/oneOf/0"},
 							{Ref: "file:///testdata/miscellaneous-examples/arrays.schema.json#/properties/vegetables"},
-							{Ref: "file:///testdata/miscellaneous-examples/complex-object.schema.json#/properties/name"},
+							{Ref: "file:///testdata/miscellaneous-examples/complex-object.schema.json#/properties/SchemaIDs"},
 						},
 						Defs: map[string]Schema{
 							"null_schema": {
@@ -119,4 +187,5 @@ func TestResolveReference(t *testing.T) {
 			}
 		})
 	}
+
 }

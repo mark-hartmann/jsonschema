@@ -8,6 +8,56 @@ import (
 	"strings"
 )
 
+type Identifiers struct {
+	BaseURI                 string
+	CanonResourcePlainURI   string
+	CanonResourcePointerURI string
+	// todo: add support for enclosing resources
+}
+
+// ComputeIdentifiers returns all schema identifiers defined in root's subschemas, excluding
+// root. The map key is a JSON pointer that points to the id defining schema.
+func ComputeIdentifiers(root Schema) (map[string]Identifiers, error) {
+	base, _ := url.Parse(root.ID)
+	m := make(map[string]Identifiers)
+	_ = Walk(root, func(ptr string, schema Schema) error {
+		if ptr == "/" || (schema.ID == "" && schema.Anchor == "") {
+			return nil
+		}
+
+		var (
+			err error
+			ids Identifiers
+		)
+
+		if schema.ID != "" {
+			id, _ := url.Parse(schema.ID)
+			schema.ID = base.ResolveReference(id).String()
+
+			m2, _ := ComputeIdentifiers(schema)
+			for k, v := range m2 {
+				m[ptr+k] = v
+			}
+
+			ids.BaseURI = base.ResolveReference(id).String()
+			ids.CanonResourcePointerURI = ids.BaseURI + "#"
+			err = Skip
+		} else {
+			ids.BaseURI = base.String()
+			ids.CanonResourcePointerURI = ids.BaseURI + "#" + ptr
+		}
+
+		if schema.Anchor != "" {
+			ids.CanonResourcePlainURI = ids.BaseURI + "#" + schema.Anchor
+		}
+
+		m[ptr] = ids
+		return err
+	})
+
+	return m, nil
+}
+
 // ResolveReference resolves a JSON reference pointer against the provided Schema.
 // If the reference (or some node of it) points to an external URI, the loaders is
 // used.

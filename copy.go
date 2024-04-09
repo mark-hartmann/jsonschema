@@ -12,6 +12,7 @@ func Copy(src Schema) Schema {
 		Vocabulary:           copyMap(src.Vocabulary),
 		ID:                   src.ID,
 		Ref:                  src.Ref,
+		Anchor:               src.Anchor,
 		DynamicRef:           src.DynamicRef,
 		Defs:                 copyMap(src.Defs, Copy),
 		Comment:              src.Comment,
