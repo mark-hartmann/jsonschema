@@ -12,7 +12,7 @@ type Identifiers struct {
 	BaseURI                 string
 	CanonResourcePlainURI   string
 	CanonResourcePointerURI string
-	// todo: add support for enclosing resources
+	EnclosingResourceURIs   []string
 }
 
 // ComputeIdentifiers returns all schema identifiers defined in root's subschemas, excluding
@@ -36,6 +36,9 @@ func ComputeIdentifiers(root Schema) (map[string]Identifiers, error) {
 
 			m2, _ := ComputeIdentifiers(schema)
 			for k, v := range m2 {
+				encURI := base.String() + "#" + ptr + k
+				v.EnclosingResourceURIs = append(v.EnclosingResourceURIs, encURI)
+
 				m[ptr+k] = v
 			}
 
@@ -49,6 +52,10 @@ func ComputeIdentifiers(root Schema) (map[string]Identifiers, error) {
 
 		if schema.Anchor != "" {
 			ids.CanonResourcePlainURI = ids.BaseURI + "#" + schema.Anchor
+		}
+
+		if encURI := base.String() + "#" + ptr; encURI != ids.CanonResourcePointerURI {
+			ids.EnclosingResourceURIs = append(ids.EnclosingResourceURIs, encURI)
 		}
 
 		m[ptr] = ids
