@@ -10,8 +10,8 @@ import (
 	"strings"
 )
 
-// UnsupportedURI is returned by a Loader to signal that the loaders is
-// unable so process the URI.
+// UnsupportedURI is returned by a Loader to signal that the loader is
+// unable to process the URI.
 var UnsupportedURI = errors.New("unsupported URI")
 
 type Loader interface {
@@ -24,7 +24,10 @@ func (f LoaderFunc) Load(ctx context.Context, uri *url.URL) (*Schema, error) {
 	return f(ctx, uri)
 }
 
-// NewEmbeddedLoader returns a Loader that searches fs for the URI.
+// NewEmbeddedLoader returns a Loader that searches fs for the URI. This loader will
+// return UnsupportedURI if the Scheme is not "file".
+//
+// Does not support distinct schema resources within a single schema document.
 func NewEmbeddedLoader(fs embed.FS) Loader {
 	return LoaderFunc(func(_ context.Context, uri *url.URL) (*Schema, error) {
 		if uri.Scheme != "file" {
