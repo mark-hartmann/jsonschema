@@ -65,10 +65,70 @@ func ComputeIdentifiers(root Schema) (map[string]Identifiers, error) {
 	return m, nil
 }
 
+// NewLocalLoader returns a loader that checks the URI against identifiable sub-schemas that
+// are located within the root schema. If a sub-schema is found, the URI is replaced with
+// a new URI relative to the resolved schema. If no schema is found, the next Loader is called.
+//
+// The identifiers are computed and prefetched only once.
+func NewLocalLoader(root *Schema, next Loader) Loader {
+	ids, _ := ComputeIdentifiers(*root)
+	ids["/"] = Identifiers{
+		BaseURI:                 root.ID,
+		CanonResourcePointerURI: root.ID + "#",
+	}
+
+	prefetched := make(map[string]*Schema)
+	for s, identifiers := range ids {
+		if identifiers.BaseURI+"#" == identifiers.CanonResourcePointerURI {
+			prefetched[identifiers.BaseURI], _ = resolveRef(context.Background(), nil,
+				getUnescapedPath(s), 0, root, root, root, true)
+		}
+	}
+	return LoaderFunc(func(ctx context.Context, uri *url.URL) (*Schema, error) {
+		var (
+			b, r string
+			u    *url.URL
+		)
+
+		// search for direct match
+		for _, id := range ids {
+			if id.CanonResourcePlainURI == uri.String() {
+				b = id.BaseURI
+				// We parse res ptr uri because ids ptr is relative to document
+				// root, we need relative to new current
+				p, _ := url.Parse(id.CanonResourcePointerURI)
+				r = p.Fragment
+				break
+			}
+		}
+
+		if b == "" {
+			u2 := *uri
+			u2.Fragment = ""
+			for _, id := range ids {
+				if id.BaseURI+"#" == id.CanonResourcePointerURI && id.BaseURI == u2.String() {
+					b = id.BaseURI
+					r = "#" + uri.Fragment
+					break
+				}
+			}
+		}
+
+		if s, ok := prefetched[b]; ok && r != "" {
+			if u, _ = url.Parse(r); u != nil {
+				*uri = *u
+			}
+			return s, nil
+		}
+		return next.Load(ctx, uri)
+	})
+}
+
 // ResolveReference resolves a JSON reference pointer against the provided Schema.
 // If the reference (or some node of it) points to an external URI, the loaders is
 // used.
-func ResolveReference(ctx context.Context, loader Loader, ref string, schema, root *Schema) (*Schema, error) {
+func ResolveReference(ctx context.Context, loader Loader, ref string, current, root,
+	documentRoot *Schema) (*Schema, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -78,16 +138,32 @@ func ResolveReference(ctx context.Context, loader Loader, ref string, schema, ro
 		return nil, fmt.Errorf("foo: failed to parse $ref URI: %v", err)
 	}
 
+	docURI, _ := url.Parse(documentRoot.ID)
+	rootURI, _ := url.Parse(root.ID)
+
+	u = docURI.ResolveReference(rootURI).ResolveReference(u)
+
+	// todo: It's probably best to cache this loader in the ctx and replace it if
+	//       the documentRoot changes.
+	localLoader := NewLocalLoader(documentRoot, loader)
+	if ls, _ := localLoader.Load(ctx, u); ls != nil {
+		current = ls
+	}
+
+	if current.ID != "" {
+		root = current
+	}
+
 	var path []string
 
 	ignoreRef := false
 	switch {
 	case u.IsAbs():
-		if schema, err = loader.Load(ctx, u); err != nil {
+		if current, err = loader.Load(ctx, u); err != nil {
 			return nil, fmt.Errorf("foo: failed to load external schema at %q: %w",
 				u.String(), err)
 		}
-		root = schema
+		root = current
 		fallthrough
 	case u.Path == "":
 		// The URI contains no path, so we can assume it is relative to root, so [root]
@@ -96,7 +172,7 @@ func ResolveReference(ctx context.Context, loader Loader, ref string, schema, ro
 		//   #/$defs/foo
 		//   file:///example/test.schema.json#properties/foo
 		path = getUnescapedPath(u.Fragment)
-		schema = root
+		current = root
 	case u.Path != "":
 		// The URI is not absolute and the JSON pointer is not relative to
 		// root, i.e. it's a relative pointer like "/properties/foo". This means
@@ -108,33 +184,37 @@ func ResolveReference(ctx context.Context, loader Loader, ref string, schema, ro
 		ignoreRef = path == nil || isRelative(path)
 	}
 
-	return resolveRef(ctx, loader, path, 0, root, schema, ignoreRef)
+	return resolveRef(ctx, loader, path, 0, current, root, documentRoot, ignoreRef)
 }
 
-func resolveRef(ctx context.Context, loader Loader, path []string, pos int, root, schema *Schema,
-	ignoreRef bool) (*Schema, error) {
+func resolveRef(ctx context.Context, loader Loader, path []string, pos int, current, root,
+	docRoot *Schema, ignoreRef bool) (*Schema, error) {
 
 	// Return if the current schema is not set, or we reached the end of
 	// the reference path without the schema having a reference itself.
-	if schema == nil || (len(path[pos:]) == 0 && schema.Ref == "") {
-		return schema, nil
+	if current == nil || (len(path[pos:]) == 0 && current.Ref == "") {
+		return current, nil
 	}
 
-	if schema.Ref != "" /* && schema.Ref != "#" */ && !ignoreRef {
+	if current.ID != "" && current != root {
+		root = current
+	}
+
+	if current.Ref != "" /* && schema.Ref != "#" */ && !ignoreRef {
 		var err error
-		if schema, err = ResolveReference(ctx, loader, schema.Ref, schema, root); err != nil {
+		if current, err = ResolveReference(ctx, loader, current.Ref, current, root, docRoot); err != nil {
 			return nil, fmt.Errorf("failed to side-load referenced schema: %w", err)
 		}
 	}
 
 	if len(path[pos:]) == 0 {
-		return schema, nil
+		return current, nil
 	}
 
 	segment := path[pos]
 	switch segment {
 	case "#":
-		return resolveRef(ctx, loader, path, pos+1, root, root, false)
+		return resolveRef(ctx, loader, path, pos+1, root, root, docRoot, false)
 	case "allOf", "anyOf", "oneOf", "prefixItems":
 		if len(path[pos:]) == 1 {
 			return nil, fmt.Errorf("resolveRef: missing array index")
@@ -145,13 +225,13 @@ func resolveRef(ctx context.Context, loader Loader, path []string, pos int, root
 		var col []Schema
 		switch segment {
 		case "allOf":
-			col = schema.AllOf
+			col = current.AllOf
 		case "anyOf":
-			col = schema.AnyOf
+			col = current.AnyOf
 		case "oneOf":
-			col = schema.OneOf
+			col = current.OneOf
 		case "prefixItems":
-			col = schema.PrefixItems
+			col = current.PrefixItems
 		}
 
 		i, err := strconv.Atoi(nextSegment)
@@ -161,7 +241,7 @@ func resolveRef(ctx context.Context, loader Loader, path []string, pos int, root
 			return nil, fmt.Errorf("resolveRef: index out of bounds %q", nextSegment)
 		}
 
-		return resolveRef(ctx, loader, path, pos+2, root, &col[i], false)
+		return resolveRef(ctx, loader, path, pos+2, &col[i], root, docRoot, false)
 	case "$defs", "dependentSchemas", "properties", "patternProperties":
 		if len(path[pos:]) == 1 {
 			return nil, fmt.Errorf("resolveRef: missing object key at %q", path[:pos+1])
@@ -170,13 +250,13 @@ func resolveRef(ctx context.Context, loader Loader, path []string, pos int, root
 		var col map[string]Schema
 		switch segment {
 		case "$defs":
-			col = schema.Defs
+			col = current.Defs
 		case "dependentSchemas":
-			col = schema.DependentSchemas
+			col = current.DependentSchemas
 		case "properties":
-			col = schema.Properties
+			col = current.Properties
 		case "patternProperties":
-			col = schema.PatternProperties
+			col = current.PatternProperties
 		}
 
 		var (
@@ -187,24 +267,24 @@ func resolveRef(ctx context.Context, loader Loader, path []string, pos int, root
 			return nil, fmt.Errorf("resolveRef: invalid path, no schema found at %q", path[:pos+2])
 		}
 
-		schema = &s
-		return resolveRef(ctx, loader, path, pos+2, root, schema, false)
+		current = &s
+		return resolveRef(ctx, loader, path, pos+2, current, root, docRoot, false)
 	case "not":
-		return resolveRef(ctx, loader, path, pos+1, root, schema.Not, false)
+		return resolveRef(ctx, loader, path, pos+1, current.Not, root, docRoot, false)
 	case "if":
-		return resolveRef(ctx, loader, path, pos+1, root, schema.If, false)
+		return resolveRef(ctx, loader, path, pos+1, current.If, root, docRoot, false)
 	case "then":
-		return resolveRef(ctx, loader, path, pos+1, root, schema.Then, false)
+		return resolveRef(ctx, loader, path, pos+1, current.Then, root, docRoot, false)
 	case "else":
-		return resolveRef(ctx, loader, path, pos+1, root, schema.Else, false)
+		return resolveRef(ctx, loader, path, pos+1, current.Else, root, docRoot, false)
 	case "items":
-		return resolveRef(ctx, loader, path, pos+1, root, schema.Items, false)
+		return resolveRef(ctx, loader, path, pos+1, current.Items, root, docRoot, false)
 	case "contains":
-		return resolveRef(ctx, loader, path, pos+1, root, schema.Contains, false)
+		return resolveRef(ctx, loader, path, pos+1, current.Contains, root, docRoot, false)
 	case "additionalProperties":
-		return resolveRef(ctx, loader, path, pos+1, root, schema.AdditionalProperties, false)
+		return resolveRef(ctx, loader, path, pos+1, current.AdditionalProperties, root, docRoot, false)
 	case "propertyNames":
-		return resolveRef(ctx, loader, path, pos+1, root, schema.PropertyNames, false)
+		return resolveRef(ctx, loader, path, pos+1, current.PropertyNames, root, docRoot, false)
 	}
 
 	return nil, fmt.Errorf("invalid path: unknown segment %q at %q", segment, path[:pos])

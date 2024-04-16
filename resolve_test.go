@@ -195,7 +195,7 @@ func TestResolveReference(t *testing.T) {
 
 	for _, td := range tests {
 		t.Run(td.name, func(t *testing.T) {
-			actual, err := ResolveReference(nil, loader, td.ref, td.in, td.in)
+			actual, err := ResolveReference(nil, loader, td.ref, td.in, td.in, td.in)
 
 			if err != nil && td.out != nil {
 				t.Logf("got err:\n %v", err)
@@ -218,4 +218,109 @@ func TestResolveReference(t *testing.T) {
 		})
 	}
 
+	t.Run("subschemas", func(t *testing.T) {
+		const idsSchema = `{
+  "$id": "https://example.com/schema.json",
+  "$defs": {
+    "A": {
+      "$anchor": "foo"
+    },
+    "B": {
+      "$id": "other.json",
+      "$defs": {
+        "X": {
+          "$anchor": "bar",
+		  "not": {
+			"$ref": "#/$defs/Y/oneOf/2"
+		  }
+        },
+		"Y": {
+		  "oneOf": [
+			{"$ref": "#/$defs/X"},
+			{"$ref": "file:///testdata/miscellaneous-examples/arrays.schema.json#/properties/vegetables"},
+			{"$ref": "https://domain.tld/schema.json#/not"},
+			{"$ref": "/schema.json#/$defs/C"}
+		  ]
+		}
+	  }
+	},
+	"C": {
+	  "type": "string"
+	},
+	"D": {
+      "$id": "https://domain.tld/schema.json",
+      "not": {
+        "$ref": "https://example.com/other.json#bar"
+      }
+	}
+  }
+}
+`
+
+		root := &Schema{}
+		_ = root.UnmarshalJSON([]byte(idsSchema))
+
+		tests2 := []struct {
+			ref      string
+			expected *Schema
+		}{
+			{
+				ref:      "#foo",
+				expected: &Schema{Anchor: "foo"},
+			},
+			{
+				ref:      "other.json#bar",
+				expected: &Schema{Anchor: "bar", Not: &Schema{Ref: "#/$defs/Y/oneOf/2"}},
+			},
+			{
+				ref: "other.json",
+				expected: &Schema{
+					ID: "other.json",
+					Defs: map[string]Schema{
+						"X": {
+							Anchor: "bar",
+							Not:    &Schema{Ref: "#/$defs/Y/oneOf/2"},
+						},
+						"Y": {
+							OneOf: []Schema{
+								{Ref: "#/$defs/X"},
+								{Ref: "file:///testdata/miscellaneous-examples/arrays.schema.json#/properties/vegetables"},
+								{Ref: "https://domain.tld/schema.json#/not"},
+								{Ref: "/schema.json#/$defs/C"},
+							},
+						},
+					},
+				},
+			},
+			{
+				ref:      "#/$defs/B/$defs/X/not",
+				expected: &Schema{Anchor: "bar", Not: &Schema{Ref: "#/$defs/Y/oneOf/2"}},
+			},
+			{
+				ref:      "#/$defs/B/$defs/Y/oneOf/1",
+				expected: &Schema{Type: TypeSet{TypeArray}, Items: &Schema{Ref: "#/$defs/veggie"}},
+			},
+			{
+				ref: "https://domain.tld/schema.json",
+				expected: &Schema{
+					ID: "https://domain.tld/schema.json",
+					Not: &Schema{
+						Ref: "https://example.com/other.json#bar",
+					},
+				},
+			},
+		}
+
+		for i, testData := range tests2 {
+			s, err := ResolveReference(nil, loader, testData.ref, root, root, root)
+			if err != nil && testData.expected != nil {
+				t.Errorf("unexpected error %s, test case at %d (%s)", err, i, testData.ref)
+			}
+
+			if !reflect.DeepEqual(s, testData.expected) {
+				t.Errorf("unexpected value at %d using $ref %q:\nneed: %s\nhave: %s", i,
+					testData.ref, testData.expected, s)
+			}
+		}
+	})
 }
