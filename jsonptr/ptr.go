@@ -1,6 +1,7 @@
 package jsonptr
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -16,6 +17,17 @@ func (e *SegmentError) Error() string {
 	return fmt.Sprintf("invalid segment %q: %s", e.Seg, e.Err)
 }
 
+func (e *SegmentError) Unwrap() error {
+	return e.Err
+}
+
+func (e *SegmentError) Is(err error) bool {
+	if e.Err == err {
+		return true
+	}
+	return errors.Is(e.Unwrap(), e.Err)
+}
+
 // EscapeSequenceError is an error indicating that an invalid escape sequence was
 // encountered. This error is returned if a segment contains a tilde that is not
 // followed by either a 0 or a 1.
@@ -29,6 +41,12 @@ type InvalidJSONPointerError string
 
 func (e InvalidJSONPointerError) Error() string {
 	return "invalid JSON pointer: " + string(e)
+}
+
+type InvalidIndexError string
+
+func (e InvalidIndexError) Error() string {
+	return fmt.Sprintf("invalid array index: %q", string(e))
 }
 
 // ValidateJSONPointerFunc validates a string according to RFC 6901 and checks the
@@ -74,4 +92,19 @@ func ValidateJSONPointerFunc(pointer string, fn func(int, []string) error) error
 	}
 
 	return nil
+}
+
+// IsArrayIndex checks if a segment is a valid JSON pointer array index.
+func IsArrayIndex(segment string) bool {
+	r := []rune(segment)
+	if len(r) == 1 && r[0] == '0' {
+		return true
+	}
+
+	for j := 0; j < len(r); j++ {
+		if (j == 0 && r[j] == '0') || (r[j] < '0' || r[j] > '9') {
+			return false
+		}
+	}
+	return true
 }
