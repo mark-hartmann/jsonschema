@@ -39,11 +39,11 @@ func TestValidateReferencePointer(t *testing.T) {
 		},
 		"anyOf zero padded index": {
 			ref: "#/anyOf/01",
-			err: `invalid segment "01": invalid array index`,
+			err: `invalid segment "01": invalid array index: "01"`,
 		},
 		"anyOf with non digit index": {
 			ref: "#/anyOf/one",
-			err: `invalid segment "one": invalid array index`,
+			err: `invalid segment "one": invalid array index: "one"`,
 		},
 		"illegal index": {
 			ref: "/then/1",
@@ -55,11 +55,11 @@ func TestValidateReferencePointer(t *testing.T) {
 		},
 		"oneOf invalid signed index": {
 			ref: "#/oneOf/+123",
-			err: `invalid segment "+123": invalid array index`,
+			err: `invalid segment "+123": invalid array index: "+123"`,
 		},
 		"oneOf invalid signed index #2": {
 			ref: "#/oneOf/-123",
-			err: `invalid segment "-123": invalid array index`,
+			err: `invalid segment "-123": invalid array index: "-123"`,
 		},
 		"invalid escape": {
 			ref: "/properties/fo~ao",

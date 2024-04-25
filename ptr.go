@@ -51,14 +51,9 @@ func schemaSegmentValidator(i int, segments []string) error {
 		case "$defs", "dependentSchemas", "properties", "patternProperties":
 			return nil
 		case "allOf", "anyOf", "oneOf", "prefixItems":
-			r := []rune(segment)
-			if len(r) == 1 && r[0] == '0' {
-				return nil
-			}
-
-			for j := 0; j < len(r); j++ {
-				if (j == 0 && r[j] == '0') || (r[j] < '0' || r[j] > '9') {
-					return &jsonptr.SegmentError{Seg: segments[i], Pos: i, Err: ErrPtrInvalidIndex}
+			if !jsonptr.IsArrayIndex(segment) {
+				return &jsonptr.SegmentError{
+					Seg: segments[i], Pos: i, Err: jsonptr.InvalidIndexError(segment),
 				}
 			}
 			return nil
