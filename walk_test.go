@@ -4,6 +4,7 @@ import (
 	"errors"
 	. "jsonschema"
 	"net/url"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -16,7 +17,7 @@ func TestWalk(t *testing.T) {
 	schema, _ := loader.Load(nil, uri)
 
 	var l1 []struct{}
-	err := Walk(*schema, func(_ string, _ Schema) error {
+	err := Walk(schema, func(_ string, _ *Schema) error {
 		l1 = append(l1, struct{}{})
 		return SkipAll
 	})
@@ -40,7 +41,7 @@ func TestWalk(t *testing.T) {
 		"/properties/membershipNumber",
 	}
 
-	err = Walk(*schema, func(s string, s1 Schema) error {
+	err = Walk(schema, func(s string, s1 *Schema) error {
 		if s != "/" {
 			l2 = append(l2, s)
 			return Skip
@@ -72,7 +73,7 @@ func TestWalk(t *testing.T) {
 		"/else/properties/membershipNumber",
 	}
 
-	err = Walk(*schema, func(s string, _ Schema) error {
+	err = Walk(schema, func(s string, _ *Schema) error {
 		if s != "/" {
 			l3 = append(l3, s)
 		}
@@ -92,9 +93,9 @@ func TestWalk(t *testing.T) {
 	}
 
 	s := ""
-	if e := Walk(Schema{AllOf: []Schema{
+	if e := Walk(&Schema{AllOf: []Schema{
 		{Properties: map[string]Schema{"foo": {}}},
-	}}, func(ptr string, _ Schema) error {
+	}}, func(ptr string, _ *Schema) error {
 		s = ptr
 		return nil
 	}); e != nil {
@@ -107,7 +108,7 @@ func TestWalk(t *testing.T) {
 		t.FailNow()
 	}
 
-	err = Walk(False, func(_ string, _ Schema) error {
+	err = Walk(&False, func(_ string, _ *Schema) error {
 		return errors.New("unexpected error")
 	})
 
@@ -127,8 +128,8 @@ func TestWalk(t *testing.T) {
 	}
 
 	// Example for a "filtered" WalkFunc.
-	filterWalkFunc := func(fn WalkFunc, filter func(kw string, s Schema) bool) WalkFunc {
-		return func(ptr string, schema Schema) error {
+	filterWalkFunc := func(fn WalkFunc, filter func(kw string, s *Schema) bool) WalkFunc {
+		return func(ptr string, schema *Schema) error {
 			if ptr == "/" {
 				return fn(ptr, schema)
 			}
@@ -152,10 +153,10 @@ func TestWalk(t *testing.T) {
 		Not:   &Schema{Description: "foo"},
 	}
 
-	filterFunc := func(kw string, s Schema) bool {
+	filterFunc := func(kw string, s *Schema) bool {
 		return kw == "allOf" && s.IsTrue()
 	}
-	_ = Walk(filterTestSchema, filterWalkFunc(func(ptr string, schema Schema) error {
+	_ = Walk(&filterTestSchema, filterWalkFunc(func(ptr string, schema *Schema) error {
 		if ptr != "/" {
 			l4 = append(l4, ptr)
 		}
@@ -167,5 +168,65 @@ func TestWalk(t *testing.T) {
 	if !slices.Equal(l4, l4c) {
 		t.Logf("expected %v, got %v", l4c, l4)
 		t.FailNow()
+	}
+
+	ptrTest := Schema{
+		AllOf: []Schema{
+			{},
+		},
+		Defs: map[string]Schema{
+			"foo": {},
+			"bar": {},
+		},
+		Items: &Schema{},
+	}
+
+	ptrTest2 := Schema{
+		Comment: "modified",
+		AllOf: []Schema{
+			{
+				Comment: "modified",
+			},
+		},
+		Defs: map[string]Schema{
+			"foo": {
+				Comment: "replaced",
+				AnyOf: []Schema{
+					{Comment: "modified"},
+				},
+			},
+			"bar": {},
+		},
+		Items: &Schema{Comment: "modified"},
+	}
+
+	_ = Walk(&ptrTest, func(ptr string, schema *Schema) error {
+		if ptr == "/$defs/foo" {
+			*schema = Schema{Comment: "replaced", AnyOf: []Schema{{}}}
+		} else if ptr != "/$defs/bar" {
+			schema.Comment = "modified"
+		}
+		return nil
+	})
+
+	if !reflect.DeepEqual(ptrTest, ptrTest2) {
+		t.Errorf("\nhave: %s\nneed: %s", &ptrTest, &ptrTest2)
+	}
+
+	for i, cause := range []string{
+		"/items",
+		"/allOf/0",
+		"/$defs/foo",
+	} {
+		err = Walk(&ptrTest, func(ptr string, schema *Schema) error {
+			if ptr == cause {
+				return errors.New("unexpected error")
+			}
+			return nil
+		})
+
+		if err == nil {
+			t.Errorf("expected error at test %d, got nil", i)
+		}
 	}
 }

@@ -20,7 +20,11 @@ type Identifiers struct {
 func ComputeIdentifiers(root Schema) (map[string]Identifiers, error) {
 	base, _ := url.Parse(root.ID)
 	m := make(map[string]Identifiers)
-	_ = Walk(root, func(ptr string, schema Schema) error {
+	_ = Walk(&root, func(ptr string, s *Schema) error {
+		// Copy the schema because we need to modify the ID for recursive calls.
+		// Weak copy is enough.
+		schema := *s
+
 		if ptr == "/" || (schema.ID == "" && schema.Anchor == "") {
 			return nil
 		}
