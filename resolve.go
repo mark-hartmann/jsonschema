@@ -124,7 +124,11 @@ func NewLocalLoader(root *Schema, next Loader) Loader {
 			}
 			return s, nil
 		}
-		return next.Load(ctx, uri)
+
+		if next != nil {
+			return next.Load(ctx, uri)
+		}
+		return nil, nil
 	})
 }
 

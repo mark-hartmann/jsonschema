@@ -195,6 +195,9 @@ func (s *Schema) hasValidators() bool {
 		s.ExclusiveMinimum != nil ||
 		s.MaxLength != nil ||
 		s.MinLength != nil ||
+		s.Pattern != nil ||
+		s.MaxItems != nil ||
+		s.MinItems != nil ||
 		s.UniqueItems != nil ||
 		s.MaxContains != nil ||
 		s.MinContains != nil ||
