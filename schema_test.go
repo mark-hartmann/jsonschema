@@ -11,13 +11,14 @@ func TestSchema_IsTrue(t *testing.T) {
 	schemas := []Schema{
 		{},
 		{ID: "https://example.com/true.schema.json"},
+		{Ref: "https://example.com/true.schema.json"},
 		{Defs: map[string]Schema{"true": {}}},
 		{Description: "A schema that evaluates to true"},
 	}
 
 	for i, schema := range schemas {
 		if schema.IsTrue() != (i == 0) {
-			t.FailNow()
+			t.Errorf("schema at %d is not true but should be: %v", i, schema.String())
 		}
 	}
 }
@@ -26,6 +27,7 @@ func TestSchema_IsFalse(t *testing.T) {
 	schemas := []Schema{
 		{Not: &Schema{}},
 		{Ref: "https://example.com/true.schema.json", Not: &Schema{}},
+		{ID: "https://example.com/true.schema.json"},
 		{Ref: "https://example.com/true.schema.json"},
 		{Type: []Type{TypeNull}},
 		{Const: 123},
@@ -34,8 +36,7 @@ func TestSchema_IsFalse(t *testing.T) {
 
 	for i, schema := range schemas {
 		if schema.IsFalse() != (i <= 1) {
-			t.Logf("schema is not false but should be: %v", schema)
-			t.FailNow()
+			t.Errorf("schema at %d is not false but should be: %v", i, schema.String())
 		}
 	}
 }
