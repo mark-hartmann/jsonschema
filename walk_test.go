@@ -1,7 +1,9 @@
 package jsonschema_test
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
 	. "jsonschema"
 	"net/url"
 	"reflect"
@@ -229,4 +231,34 @@ func TestWalk(t *testing.T) {
 			t.Errorf("expected error at test %d, got nil", i)
 		}
 	}
+}
+
+func ExampleWalk() {
+	const p = `
+{
+  "$ref": "/$defs/len",
+  "minItems": 1,
+  "$defs": {
+    "len": {
+      "minItems": 2
+    }
+  }
+}`
+	s := Schema{}
+	_ = json.Unmarshal([]byte(p), &s)
+
+	_ = Walk(&s, func(ptr string, s *Schema) error {
+		if s.Ref != "" {
+			s2, _ := ResolveReference(nil, nil, s.Ref, s, s, s)
+			// The new s is walked after this function returns, applying
+			// this function to both schemas in the slice. We remove the
+			// reference pointer to prevent endless cycles ((/allOf/0)+)
+			s.Ref = ""
+			*s = Schema{AllOf: []Schema{*s, *s2}}
+		}
+		return nil
+	})
+
+	fmt.Println(s.String())
+	// Output: {"allOf":[{"$defs":{"len":{"minItems":2}},"minItems":1},{"minItems":2}]}
 }

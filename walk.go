@@ -22,7 +22,16 @@ var (
 type WalkFunc func(ptr string, schema *Schema) error
 
 // Walk walks the schema tree rooted at root, calling fn for each schema, including
-// root. The schemas are not walked in lexical order.
+// root. The schemas are not walked in lexical order. The WalkFunc is first called
+// with the current schema and then walked if no error occurred.
+//
+// If WalkFunc replaces the current schema, the new schema is walked:
+//
+//	func(ptr string, schema *Schema) error {
+//	  // current schema is {"not":{}}
+//	  *schema = Schema{AllOf: []Schema{/*...*/}}
+//	  return nil
+//	}
 func Walk(root *Schema, fn WalkFunc) error {
 	if err := fn("/", root); err != nil {
 		if errors.Is(err, Skip) || errors.Is(err, SkipAll) {
