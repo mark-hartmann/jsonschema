@@ -84,8 +84,8 @@ func NewLocalLoader(root *Schema, next Loader) Loader {
 	prefetched := make(map[string]*Schema)
 	for s, identifiers := range ids {
 		if identifiers.BaseURI+"#" == identifiers.CanonResourcePointerURI {
-			prefetched[identifiers.BaseURI], _ = resolveRef(context.Background(), nil,
-				getUnescapedPath(s), 0, root, root, root, true)
+			prefetched[identifiers.BaseURI], _ = resolveRef(ResolveConfig{ignoreRefs: true}, root,
+				getUnescapedPath(s), 0)
 		}
 	}
 	return LoaderFunc(func(ctx context.Context, uri *url.URL) (*Schema, error) {
@@ -132,19 +132,38 @@ func NewLocalLoader(root *Schema, next Loader) Loader {
 	})
 }
 
+type ResolveConfig struct {
+	Context      context.Context
+	Loader       Loader
+	Root         *Schema
+	DocumentRoot *Schema
+
+	ignoreRefs bool
+}
+
+func applyDefaults(config *ResolveConfig, schema *Schema) {
+	if config.Context == nil {
+		config.Context = context.Background()
+	}
+	if config.Root == nil {
+		config.Root = schema
+	}
+	if config.DocumentRoot == nil {
+		config.DocumentRoot = config.Root
+	}
+}
+
 // ResolveReference resolves a JSON reference pointer against the provided Schema.
 // If the reference (or some node of it) points to an external URI, the loaders is
 // used.
-func ResolveReference(ctx context.Context, loader Loader, ref string, current, root,
-	documentRoot *Schema) (*Schema, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-
+func ResolveReference(config ResolveConfig, ref string, current *Schema) (*Schema, error) {
 	u, err := url.Parse(ref)
 	if err != nil {
 		return nil, fmt.Errorf("foo: failed to parse $ref URI: %v", err)
 	}
+
+	applyDefaults(&config, current)
+	ctx, loader, root, documentRoot := config.Context, config.Loader, config.Root, config.DocumentRoot
 
 	docURI, _ := url.Parse(documentRoot.ID)
 	rootURI, _ := url.Parse(root.ID)
@@ -159,19 +178,18 @@ func ResolveReference(ctx context.Context, loader Loader, ref string, current, r
 	}
 
 	if current.ID != "" {
-		root = current
+		root, config.Root = current, current
 	}
 
 	var path []string
 
-	ignoreRef := false
 	switch {
 	case u.IsAbs():
 		if current, err = loader.Load(ctx, u); err != nil {
 			return nil, fmt.Errorf("foo: failed to load external schema at %q: %w",
 				u.String(), err)
 		}
-		root = current
+		root, config.Root = current, current
 		fallthrough
 	case u.Path == "":
 		// The URI contains no path, so we can assume it is relative to root, so [root]
@@ -189,14 +207,13 @@ func ResolveReference(ctx context.Context, loader Loader, ref string, current, r
 		// Schema are treated as READONLY, i.e. we can't remove the $ref from schema, which
 		// is - if set - followed in [resolveRef], resulting in a stack overflow.
 		path = getUnescapedPath(u.Path)
-		ignoreRef = path == nil || isRelative(path)
+		config.ignoreRefs = path == nil || isRelative(path)
 	}
 
-	return resolveRef(ctx, loader, path, 0, current, root, documentRoot, ignoreRef)
+	return resolveRef(config, current, path, 0)
 }
 
-func resolveRef(ctx context.Context, loader Loader, path []string, pos int, current, root,
-	docRoot *Schema, ignoreRef bool) (*Schema, error) {
+func resolveRef(config ResolveConfig, current *Schema, path []string, pos int) (*Schema, error) {
 
 	// Return if the current schema is not set, or we reached the end of
 	// the reference path without the schema having a reference itself.
@@ -204,13 +221,14 @@ func resolveRef(ctx context.Context, loader Loader, path []string, pos int, curr
 		return current, nil
 	}
 
+	root := config.Root
 	if current.ID != "" && current != root {
-		root = current
+		root, config.Root = current, current
 	}
 
-	if current.Ref != "" /* && schema.Ref != "#" */ && !ignoreRef {
+	if current.Ref != "" /* && schema.Ref != "#" */ && !config.ignoreRefs {
 		var err error
-		if current, err = ResolveReference(ctx, loader, current.Ref, current, root, docRoot); err != nil {
+		if current, err = ResolveReference(config, current.Ref, current); err != nil {
 			return nil, fmt.Errorf("failed to side-load referenced schema: %w", err)
 		}
 	}
@@ -219,10 +237,11 @@ func resolveRef(ctx context.Context, loader Loader, path []string, pos int, curr
 		return current, nil
 	}
 
+	config.ignoreRefs = false
 	segment := path[pos]
 	switch segment {
 	case "#":
-		return resolveRef(ctx, loader, path, pos+1, root, root, docRoot, false)
+		return resolveRef(config, root, path, pos+1)
 	case "allOf", "anyOf", "oneOf", "prefixItems":
 		if len(path[pos:]) == 1 {
 			return nil, fmt.Errorf("resolveRef: missing array index")
@@ -249,7 +268,7 @@ func resolveRef(ctx context.Context, loader Loader, path []string, pos int, curr
 			return nil, fmt.Errorf("resolveRef: index out of bounds %q", nextSegment)
 		}
 
-		return resolveRef(ctx, loader, path, pos+2, &col[i], root, docRoot, false)
+		return resolveRef(config, &col[i], path, pos+2)
 	case "$defs", "dependentSchemas", "properties", "patternProperties":
 		if len(path[pos:]) == 1 {
 			return nil, fmt.Errorf("resolveRef: missing object key at %q", path[:pos+1])
@@ -276,23 +295,23 @@ func resolveRef(ctx context.Context, loader Loader, path []string, pos int, curr
 		}
 
 		current = &s
-		return resolveRef(ctx, loader, path, pos+2, current, root, docRoot, false)
+		return resolveRef(config, current, path, pos+2)
 	case "not":
-		return resolveRef(ctx, loader, path, pos+1, current.Not, root, docRoot, false)
+		return resolveRef(config, current.Not, path, pos+1)
 	case "if":
-		return resolveRef(ctx, loader, path, pos+1, current.If, root, docRoot, false)
+		return resolveRef(config, current.If, path, pos+1)
 	case "then":
-		return resolveRef(ctx, loader, path, pos+1, current.Then, root, docRoot, false)
+		return resolveRef(config, current.Then, path, pos+1)
 	case "else":
-		return resolveRef(ctx, loader, path, pos+1, current.Else, root, docRoot, false)
+		return resolveRef(config, current.Else, path, pos+1)
 	case "items":
-		return resolveRef(ctx, loader, path, pos+1, current.Items, root, docRoot, false)
+		return resolveRef(config, current.Items, path, pos+1)
 	case "contains":
-		return resolveRef(ctx, loader, path, pos+1, current.Contains, root, docRoot, false)
+		return resolveRef(config, current.Contains, path, pos+1)
 	case "additionalProperties":
-		return resolveRef(ctx, loader, path, pos+1, current.AdditionalProperties, root, docRoot, false)
+		return resolveRef(config, current.AdditionalProperties, path, pos+1)
 	case "propertyNames":
-		return resolveRef(ctx, loader, path, pos+1, current.PropertyNames, root, docRoot, false)
+		return resolveRef(config, current.PropertyNames, path, pos+1)
 	}
 
 	return nil, fmt.Errorf("invalid path: unknown segment %q at %q", segment, path[:pos])

@@ -249,7 +249,7 @@ func ExampleWalk() {
 
 	_ = Walk(&s, func(ptr string, s *Schema) error {
 		if s.Ref != "" {
-			s2, _ := ResolveReference(nil, nil, s.Ref, s, s, s)
+			s2, _ := ResolveReference(ResolveConfig{}, s.Ref, s)
 			// The new s is walked after this function returns, applying
 			// this function to both schemas in the slice. We remove the
 			// reference pointer to prevent endless cycles ((/allOf/0)+)

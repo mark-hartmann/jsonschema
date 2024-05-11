@@ -195,7 +195,7 @@ func TestResolveReference(t *testing.T) {
 
 	for _, td := range tests {
 		t.Run(td.name, func(t *testing.T) {
-			actual, err := ResolveReference(nil, loader, td.ref, td.in, td.in, td.in)
+			actual, err := ResolveReference(ResolveConfig{Loader: loader}, td.ref, td.in)
 
 			if err != nil && td.out != nil {
 				t.Logf("got err:\n %v", err)
@@ -312,7 +312,7 @@ func TestResolveReference(t *testing.T) {
 		}
 
 		for i, testData := range tests2 {
-			s, err := ResolveReference(nil, loader, testData.ref, root, root, root)
+			s, err := ResolveReference(ResolveConfig{Loader: loader}, testData.ref, root)
 			if err != nil && testData.expected != nil {
 				t.Errorf("unexpected error %s, test case at %d (%s)", err, i, testData.ref)
 			}
