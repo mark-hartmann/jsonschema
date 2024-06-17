@@ -5,9 +5,6 @@ import (
 	"jsonschema/jsonptr"
 )
 
-// ErrPtrInvalidIndex is a sentinel error indicating a malformed array index.
-var ErrPtrInvalidIndex = errors.New("invalid array index")
-
 // ErrPtrUnknownKeyword is a sentinel error indicating that an unknown keyword was
 // encountered. This error is specific to the context of applicators as described
 // in the [applicator] meta-schema/vocabulary, including the non-applicator
