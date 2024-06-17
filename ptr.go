@@ -20,9 +20,27 @@ var ErrPtrNoSchema = errors.New("does not point to schema")
 // ValidateReferencePointer validates a schema reference pointer.
 func ValidateReferencePointer(ref string) error {
 	if len(ref) > 1 && ref[0] == '#' {
-		ref = ref[1:]
+		if ref = ref[1:]; isNCName(ref) {
+			return nil
+		}
 	}
 	return jsonptr.ValidateJSONPointerFunc(ref, schemaSegmentValidator)
+}
+
+func isNCName(str string) bool {
+	r := []rune(str)
+	for i := 0; i < len(r); i++ {
+		isNumber := r[i] >= '0' && r[i] <= '9'
+		isLetter := (r[i] >= 'A' && r[i] <= 'Z') || (r[i] >= 'a' && r[i] <= 'z')
+
+		if !isLetter && !isNumber && r[i] != '_' {
+			if i > 0 && (r[i] == '-' || r[i] == '.') {
+				continue
+			}
+			return false
+		}
+	}
+	return true
 }
 
 func schemaSegmentValidator(i int, segments []string) error {

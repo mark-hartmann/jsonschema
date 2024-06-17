@@ -16,6 +16,15 @@ func TestValidateReferencePointer(t *testing.T) {
 		"anyOf without index but /": {ref: "#/anyOf/"},
 		"not":                       {ref: "/not"},
 		"if then":                   {ref: "/if/then"},
+		"anchor":                    {ref: "#anchor"},
+		"anchor #2": {
+			ref: "#+anchor",
+			err: "invalid JSON pointer: +anchor",
+		},
+		"anchor #3": {
+			ref: "#anch~or",
+			err: "invalid JSON pointer: anch~or",
+		},
 		"if then with slash": {
 			ref: "/if/then/",
 			err: `invalid segment "": unknown keyword`,
