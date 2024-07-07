@@ -85,7 +85,7 @@ func NewLocalLoader(root *Schema, next Loader) Loader {
 			}
 		}
 
-		if b == "" {
+		if b == "" && r == "" {
 			u2 := *uri
 			u2.Fragment = ""
 			for _, id := range ids {
