@@ -236,7 +236,7 @@ func TestWalk(t *testing.T) {
 func ExampleWalk() {
 	const p = `
 {
-  "$ref": "/$defs/len",
+  "$ref": "#/$defs/len",
   "minItems": 1,
   "$defs": {
     "len": {
@@ -247,9 +247,13 @@ func ExampleWalk() {
 	s := Schema{}
 	_ = json.Unmarshal([]byte(p), &s)
 
-	_ = Walk(&s, func(ptr string, s *Schema) error {
+	err := Walk(&s, func(ptr string, s *Schema) error {
 		if s.Ref != "" {
-			s2, _ := ResolveReference(ResolveConfig{}, s.Ref, s)
+			s2, err := ResolveReference(ResolveConfig{}, s.Ref, s)
+			if err != nil {
+				return fmt.Errorf("failed to resolve reference %q: %w", s.Ref, err)
+			}
+
 			// The new s is walked after this function returns, applying
 			// this function to both schemas in the slice. We remove the
 			// reference pointer to prevent endless cycles ((/allOf/0)+)
@@ -259,6 +263,6 @@ func ExampleWalk() {
 		return nil
 	})
 
-	fmt.Println(s.String())
-	// Output: {"allOf":[{"$defs":{"len":{"minItems":2}},"minItems":1},{"minItems":2}]}
+	fmt.Println(s.String(), err)
+	// Output: {"allOf":[{"$defs":{"len":{"minItems":2}},"minItems":1},{"minItems":2}]} <nil>
 }
