@@ -1,6 +1,8 @@
 package jsonschema
 
-import "net/url"
+import (
+	"net/url"
+)
 
 type Identifiers struct {
 	BaseURI                 string
@@ -61,4 +63,18 @@ func ComputeIdentifiers(root Schema) (map[string]Identifiers, error) {
 	})
 
 	return m, nil
+}
+
+// isEmbedded returns whether a URI is embedded, i.e. if the root schema resource
+// embeds a schema resource with the same base URI. It does not check if the provided
+// reference URI actually exists.
+func isEmbedded(rawURI string, identifiers map[string]Identifiers) bool {
+	uri, _ := url.Parse(rawURI)
+	uri.Fragment = ""
+	for _, id := range identifiers {
+		if id.BaseURI == uri.String() {
+			return true
+		}
+	}
+	return false
 }

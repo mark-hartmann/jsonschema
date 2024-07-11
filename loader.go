@@ -39,6 +39,8 @@ func NewEmbeddedLoader(fs embed.FS) Loader {
 			return nil, err
 		}
 
+		*uri = url.URL{Fragment: uri.Fragment}
+
 		s := &Schema{}
 		if err = json.Unmarshal(d, s); err != nil {
 			return nil, fmt.Errorf("failed to read schema: %w", err)
@@ -95,6 +97,10 @@ func NewLocalLoader(root *Schema, next Loader) Loader {
 					break
 				}
 			}
+		}
+
+		if len(r) > 1 && isNCName(r[1:]) {
+			return nil, fmt.Errorf("unknown anchor %q at %q", r[1:], b)
 		}
 
 		if s, ok := prefetched[b]; ok && r != "" {

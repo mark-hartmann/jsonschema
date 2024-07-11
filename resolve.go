@@ -9,103 +9,150 @@ import (
 )
 
 type ResolveConfig struct {
-	Context      context.Context
-	Loader       Loader
-	Root         *Schema
-	DocumentRoot *Schema
+	Context context.Context
+	Loader  Loader
 
-	ignoreRefs bool
+	resource            *Schema
+	rootResource        *Schema
+	rootResourceLoader  Loader
+	resourceURI         *url.URL
+	computedIdentifiers map[string]Identifiers
+	ignoreRefs          bool
 }
 
-func applyDefaults(config *ResolveConfig, schema *Schema) {
+func applyDefaults(config *ResolveConfig, resource *Schema) {
 	if config.Context == nil {
 		config.Context = context.Background()
 	}
-	if config.Root == nil {
-		config.Root = schema
+
+	if config.Loader == nil {
+		config.Loader = LoaderFunc(func(_ context.Context, uri *url.URL) (*Schema, error) {
+			return nil, fmt.Errorf("no loader configured")
+		})
 	}
-	if config.DocumentRoot == nil {
-		config.DocumentRoot = config.Root
+
+	if config.resource == nil {
+		config.resource = resource
+	}
+
+	if config.resourceURI == nil {
+		config.resourceURI, _ = url.Parse(resource.ID)
+	}
+
+	if config.rootResource == nil {
+		config.rootResource = resource
+		config.rootResourceLoader = NewLocalLoader(resource, nil)
+		config.computedIdentifiers, _ = ComputeIdentifiers(*resource)
 	}
 }
 
 // ResolveReference resolves a JSON reference pointer against the provided Schema.
 // If the reference (or some node of it) points to an external URI, the loaders is
 // used.
-func ResolveReference(config ResolveConfig, ref string, current *Schema) (*Schema, error) {
-	u, err := url.Parse(ref)
-	if err != nil {
-		return nil, fmt.Errorf("foo: failed to parse $ref URI: %v", err)
+func ResolveReference(config ResolveConfig, ref string, resource *Schema) (*Schema, error) {
+	applyDefaults(&config, resource)
+
+	if resource.ID != "" {
+		config.resource = resource
+
+		uri, _ := url.Parse(resource.ID)
+		config.resourceURI = config.resourceURI.ResolveReference(uri)
+
+		// If ids are not computed or the resource ID is not embedded in the root
+		// schema resource!
+		if config.computedIdentifiers == nil || !isEmbedded(resource.ID, config.computedIdentifiers) {
+			config.computedIdentifiers, _ = ComputeIdentifiers(*resource)
+		}
 	}
 
-	applyDefaults(&config, current)
-	ctx, loader, root, documentRoot := config.Context, config.Loader, config.Root, config.DocumentRoot
-
-	docURI, _ := url.Parse(documentRoot.ID)
-	rootURI, _ := url.Parse(root.ID)
-
-	u = docURI.ResolveReference(rootURI).ResolveReference(u)
-
-	// todo: It's probably best to cache this loader in the ctx and replace it if
-	//       the documentRoot changes.
-	localLoader := NewLocalLoader(documentRoot, loader)
-	if ls, _ := localLoader.Load(ctx, u); ls != nil {
-		current = ls
-	}
-
-	if current.ID != "" {
-		root, config.Root = current, current
-	}
+	uri, _ := url.Parse(ref)
+	isPointerReference := len(ref) == 0 || len(ref) > 2 && ref[0] == '#' && ref[1] == '/'
 
 	var path []string
+	if isPointerReference {
+		path = getUnescapedPath(uri.Fragment)
+	} else {
+		uri = config.resourceURI.ResolveReference(uri)
+		if isEmbedded(uri.String(), config.computedIdentifiers) {
+			var ids Identifiers
 
-	switch {
-	case u.IsAbs():
-		if current, err = loader.Load(ctx, u); err != nil {
-			return nil, fmt.Errorf("foo: failed to load external schema at %q: %w",
-				u.String(), err)
+			bURI, _ := url.Parse(uri.String())
+			bURI.Fragment = ""
+			for _, id := range config.computedIdentifiers {
+				if id.BaseURI == uri.String() {
+					ids = id
+					break
+				}
+			}
+
+			s, err := config.rootResourceLoader.Load(config.Context, uri)
+			if err != nil {
+				return nil, fmt.Errorf("unable to locate embedded resource: %w", err)
+			}
+
+			resource = s
+			config.resource = s
+			config.resourceURI, _ = url.Parse(ids.BaseURI)
+		} else {
+			s, err := config.Loader.Load(config.Context, uri)
+			if err != nil {
+				return nil, fmt.Errorf("unable to locate non-embedded resource {\"$id\": %q}: %w", uri, err)
+			}
+			return ResolveReference(ResolveConfig{Context: config.Context, Loader: config.Loader}, uri.String(), s)
 		}
-		root, config.Root = current, current
-		fallthrough
-	case u.Path == "":
-		// The URI contains no path, so we can assume it is relative to root, so [root]
-		// is now our [schema]. For example:
-		//
-		//   #/$defs/foo
-		//   file:///example/test.schema.json#properties/foo
-		path = getUnescapedPath(u.Fragment)
-		current = root
-	case u.Path != "":
-		// The URI is not absolute and the JSON pointer is not relative to
-		// root, i.e. it's a relative pointer like "/properties/foo". This means
-		// neither [schema] nor [root] changes.
-		//
-		// Schema are treated as READONLY, i.e. we can't remove the $ref from schema, which
-		// is - if set - followed in [resolveRef], resulting in a stack overflow.
-		path = getUnescapedPath(u.Path)
-		config.ignoreRefs = path == nil || isRelative(path)
+
+		if uri.Path != "" {
+			path = getUnescapedPath(uri.Path)
+		} else {
+			path = getUnescapedPath(uri.Fragment)
+		}
 	}
 
-	return resolveRef(config, current, path, 0)
+	config.ignoreRefs = true
+	return resolveRef(config, config.resource, path, 0)
+}
+
+func fmtPos(config ResolveConfig, path []string, pos int) string {
+	var res string
+	if uriStr := config.resourceURI.String(); uriStr != "" {
+		res = uriStr
+	} else {
+		res = "<root>"
+	}
+
+	return fmt.Sprintf("%s%s", res, fmtPtrPosition(path, pos))
+}
+
+func fmtPtrPosition(path []string, pos int) string {
+	var sb strings.Builder
+	sb.WriteString("#/")
+	for i := 0; i < pos; i++ {
+		sb.WriteString(path[i])
+		if i < pos-1 {
+			sb.WriteString("/")
+		}
+	}
+	return sb.String()
 }
 
 func resolveRef(config ResolveConfig, current *Schema, path []string, pos int) (*Schema, error) {
-
 	// Return if the current schema is not set, or we reached the end of
 	// the reference path without the schema having a reference itself.
 	if current == nil || (len(path[pos:]) == 0 && current.Ref == "") {
 		return current, nil
 	}
 
-	root := config.Root
-	if current.ID != "" && current != root {
-		root, config.Root = current, current
+	if current.ID != "" {
+		uri, _ := url.Parse(current.ID)
+		config.resource = current
+		config.resourceURI = config.resourceURI.ResolveReference(uri)
 	}
 
-	if current.Ref != "" /* && schema.Ref != "#" */ && !config.ignoreRefs {
+	if current.Ref != "" /* && schema.Ref != "#" */ && (!config.ignoreRefs && len(path[pos:]) == 0) {
 		var err error
+		r := current.Ref
 		if current, err = ResolveReference(config, current.Ref, current); err != nil {
-			return nil, fmt.Errorf("failed to side-load referenced schema: %w", err)
+			return nil, fmt.Errorf("failed to resolve {\"$ref\": %q} at %q: %w", r, fmtPos(config, path, pos), err)
 		}
 	}
 
@@ -116,11 +163,9 @@ func resolveRef(config ResolveConfig, current *Schema, path []string, pos int) (
 	config.ignoreRefs = false
 	segment := path[pos]
 	switch segment {
-	case "#":
-		return resolveRef(config, root, path, pos+1)
 	case "allOf", "anyOf", "oneOf", "prefixItems":
 		if len(path[pos:]) == 1 {
-			return nil, fmt.Errorf("resolveRef: missing array index")
+			return nil, fmt.Errorf("missing array index at %q", fmtPos(config, path, pos+1))
 		}
 
 		nextSegment := path[pos+1]
@@ -139,15 +184,15 @@ func resolveRef(config ResolveConfig, current *Schema, path []string, pos int) (
 
 		i, err := strconv.Atoi(nextSegment)
 		if err != nil {
-			return nil, fmt.Errorf("resolveRef: invalid array index %q: %w", nextSegment, err)
+			return nil, fmt.Errorf("invalid array index %q at %q: %w", nextSegment, fmtPos(config, path, pos+1), err)
 		} else if len(col) <= i {
-			return nil, fmt.Errorf("resolveRef: index out of bounds %q", nextSegment)
+			return nil, fmt.Errorf("index out of bounds (%d/%d) at %q", i, len(col)-1, fmtPos(config, path, pos+1))
 		}
 
 		return resolveRef(config, &col[i], path, pos+2)
 	case "$defs", "dependentSchemas", "properties", "patternProperties":
 		if len(path[pos:]) == 1 {
-			return nil, fmt.Errorf("resolveRef: missing object key at %q", path[:pos+1])
+			return nil, fmt.Errorf("missing key at %q", fmtPos(config, path, pos+1))
 		}
 
 		var col map[string]Schema
@@ -167,39 +212,42 @@ func resolveRef(config ResolveConfig, current *Schema, path []string, pos int) (
 			ok bool
 		)
 		if s, ok = col[path[pos+1]]; !ok {
-			return nil, fmt.Errorf("resolveRef: invalid path, no schema found at %q", path[:pos+2])
+			return nil, fmt.Errorf("unknown key %q at %q", path[pos+1], fmtPos(config, path, pos+1))
 		}
 
 		current = &s
 		return resolveRef(config, current, path, pos+2)
-	case "not":
-		return resolveRef(config, current.Not, path, pos+1)
-	case "if":
-		return resolveRef(config, current.If, path, pos+1)
-	case "then":
-		return resolveRef(config, current.Then, path, pos+1)
-	case "else":
-		return resolveRef(config, current.Else, path, pos+1)
-	case "items":
-		return resolveRef(config, current.Items, path, pos+1)
-	case "contains":
-		return resolveRef(config, current.Contains, path, pos+1)
-	case "additionalProperties":
-		return resolveRef(config, current.AdditionalProperties, path, pos+1)
-	case "propertyNames":
-		return resolveRef(config, current.PropertyNames, path, pos+1)
+	case "not", "if", "then", "else", "items", "contains", "additionalProperties", "propertyNames":
+		var s *Schema
+		switch segment {
+		case "not":
+			s = current.Not
+		case "if":
+			s = current.If
+		case "then":
+			s = current.Then
+		case "else":
+			s = current.Else
+		case "items":
+			s = current.Items
+		case "contains":
+			s = current.Contains
+		case "additionalProperties":
+			s = current.AdditionalProperties
+		case "propertyNames":
+			s = current.PropertyNames
+		}
+
+		if s == nil {
+			return nil, fmt.Errorf("missing schema at %q", fmtPos(config, path, pos+1))
+		}
+		return resolveRef(config, s, path, pos+1)
 	}
-
-	return nil, fmt.Errorf("invalid path: unknown segment %q at %q", segment, path[:pos])
-}
-
-func isRelative(path []string) bool {
-	return len(path) > 0 && path[0] != "#"
+	return nil, fmt.Errorf("unknown keyword %q at %q", segment, fmtPos(config, path, pos))
 }
 
 func getUnescapedPath(ref string) []string {
 	ref = strings.TrimPrefix(ref, "/")
-	ref = strings.TrimSuffix(ref, "/")
 
 	if ref == "" {
 		return nil
