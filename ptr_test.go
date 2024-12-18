@@ -16,6 +16,9 @@ func TestValidateReferencePointer(t *testing.T) {
 		"anyOf without index but /": {ref: "#/anyOf/"},
 		"not":                       {ref: "/not"},
 		"if then":                   {ref: "/if/then"},
+		"unevaluated properties":    {ref: "/unevaluatedProperties"},
+		"if unevaluated items":      {ref: "/if/unevaluatedItems"},
+		"one of content schema":     {ref: "/oneOf/1/contentSchema"},
 		"anchor":                    {ref: "#anchor"},
 		"anchor #2": {
 			ref: "#+anchor",

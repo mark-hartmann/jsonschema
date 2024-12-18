@@ -14,6 +14,7 @@ func Copy(src Schema) Schema {
 		Ref:                  src.Ref,
 		Anchor:               src.Anchor,
 		DynamicRef:           src.DynamicRef,
+		DynamicAnchor:        src.DynamicAnchor,
 		Defs:                 copyMap(src.Defs, Copy),
 		Comment:              src.Comment,
 		AllOf:                copySlice(src.AllOf, Copy),
@@ -53,13 +54,19 @@ func Copy(src Schema) Schema {
 		DependentRequired: copyMap(src.DependentRequired, func(src []string) []string {
 			return copySlice(src)
 		}),
-		Title:       src.Title,
-		Description: src.Description,
-		Default:     copyAny(src.Default),
-		Deprecated:  copyPtr(src.Deprecated),
-		ReadOnly:    copyPtr(src.ReadOnly),
-		WriteOnly:   copyPtr(src.WriteOnly),
-		Examples:    copyAny(src.Examples),
+		UnevaluatedItems:      copyPtr(src.UnevaluatedItems, Copy),
+		UnevaluatedProperties: copyPtr(src.UnevaluatedProperties, Copy),
+		Format:                copyPtr(src.Format),
+		ContentEncoding:       copyPtr(src.ContentEncoding),
+		ContentMediaType:      copyPtr(src.ContentMediaType),
+		ContentSchema:         copyPtr(src.ContentSchema, Copy),
+		Title:                 src.Title,
+		Description:           src.Description,
+		Default:               copyAny(src.Default),
+		Deprecated:            copyPtr(src.Deprecated),
+		ReadOnly:              copyPtr(src.ReadOnly),
+		WriteOnly:             copyPtr(src.WriteOnly),
+		Examples:              copyAny(src.Examples),
 	}
 }
 

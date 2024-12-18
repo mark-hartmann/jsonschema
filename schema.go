@@ -42,15 +42,20 @@ var (
 )
 
 type Schema struct {
+	// https://json-schema.org/draft/2020-12/meta/core
+
 	// Core
-	Schema     string            `json:"$schema,omitempty"`
-	Vocabulary map[string]bool   `json:"$vocabulary,omitempty"`
-	ID         string            `json:"$id,omitempty"`
-	Ref        string            `json:"$ref,omitempty"`
-	Anchor     string            `json:"$anchor,omitempty"`
-	DynamicRef string            `json:"$dynamicRef,omitempty"`
-	Defs       map[string]Schema `json:"$defs,omitempty"`
-	Comment    string            `json:"$comment,omitempty"`
+	Schema        string            `json:"$schema,omitempty"`
+	Vocabulary    map[string]bool   `json:"$vocabulary,omitempty"`
+	ID            string            `json:"$id,omitempty"`
+	Ref           string            `json:"$ref,omitempty"`
+	Anchor        string            `json:"$anchor,omitempty"`
+	DynamicRef    string            `json:"$dynamicRef,omitempty"`
+	DynamicAnchor string            `json:"$dynamicAnchor,omitempty"`
+	Defs          map[string]Schema `json:"$defs,omitempty"`
+	Comment       string            `json:"$comment,omitempty"`
+
+	// https://json-schema.org/draft/2020-12/meta/applicator
 
 	// Applying subschemas with logic
 	AllOf []Schema `json:"allOf,omitempty"`
@@ -74,6 +79,8 @@ type Schema struct {
 	PatternProperties    map[string]Schema `json:"patternProperties,omitempty"`
 	AdditionalProperties *Schema           `json:"additionalProperties,omitempty"`
 	PropertyNames        *Schema           `json:"propertyNames,omitempty"`
+
+	// https://json-schema.org/draft/2020-12/meta/validation
 
 	// Validation
 	Type  TypeSet `json:"type,omitempty"`
@@ -104,6 +111,23 @@ type Schema struct {
 	MinProperties     *int                `json:"minProperties,omitempty"`
 	Required          []string            `json:"required,omitempty"`
 	DependentRequired map[string][]string `json:"dependentRequired,omitempty"`
+
+	// https://json-schema.org/draft/2020-12/meta/unevaluated
+
+	UnevaluatedItems      *Schema `json:"unevaluatedItems,omitempty"`
+	UnevaluatedProperties *Schema `json:"unevaluatedProperties,omitempty"`
+
+	// https://json-schema.org/draft/2020-12/meta/format-annotation
+
+	Format *string `json:"format,omitempty"`
+
+	// https://json-schema.org/draft/2020-12/meta/content
+
+	ContentEncoding  *string `json:"contentEncoding,omitempty"`
+	ContentMediaType *string `json:"contentMediaType,omitempty"`
+	ContentSchema    *Schema `json:"contentSchema,omitempty"`
+
+	// https://json-schema.org/draft/2020-12/meta/meta-data
 
 	// Basic metadata annotations
 	Title       string `json:"title,omitempty"`
@@ -149,21 +173,25 @@ func (s *Schema) MarshalJSON() ([]byte, error) {
 }
 
 func (s *Schema) hasMetadata() bool {
-	return s.Schema != "" ||
-		len(s.Vocabulary) > 0 ||
-		s.ID != "" ||
-		s.Ref != "" ||
-		s.Anchor != "" ||
-		s.DynamicRef != "" ||
-		len(s.Defs) > 0 ||
-		s.Comment != "" ||
-		s.Title != "" ||
+	return s.Title != "" ||
 		s.Description != "" ||
 		s.Default != nil ||
 		s.Deprecated != nil ||
 		s.ReadOnly != nil ||
 		s.WriteOnly != nil ||
 		len(s.Examples) > 0
+}
+
+func (s *Schema) hasCore() bool {
+	return s.Schema != "" ||
+		len(s.Vocabulary) > 0 ||
+		s.ID != "" ||
+		s.Ref != "" ||
+		s.Anchor != "" ||
+		s.DynamicRef != "" ||
+		s.DynamicAnchor != "" ||
+		len(s.Defs) > 0 ||
+		s.Comment != ""
 }
 
 func (s *Schema) hasApplicators() bool {
@@ -207,6 +235,18 @@ func (s *Schema) hasValidators() bool {
 		s.DependentRequired != nil
 }
 
+func (s *Schema) hasUnevaluated() bool {
+	return s.UnevaluatedItems != nil || s.UnevaluatedProperties != nil
+}
+
+func (s *Schema) hasFormat() bool {
+	return s.Format != nil
+}
+
+func (s *Schema) hasContent() bool {
+	return s.ContentEncoding != nil || s.ContentMediaType != nil || s.ContentSchema != nil
+}
+
 // IsTrue will return true if the Schema is empty. Any annotations or
 // keywords mean that the schema is not considered empty.
 //
@@ -214,7 +254,8 @@ func (s *Schema) hasValidators() bool {
 //	Schema{Default: true}     // false
 //	Schema{AllOf: Schema[{}]} // false
 func (s *Schema) IsTrue() bool {
-	return !s.hasMetadata() && !s.hasApplicators() && !s.hasValidators()
+	return !s.hasCore() && !s.hasApplicators() && !s.hasValidators() &&
+		!s.hasUnevaluated() && !s.hasMetadata() && !s.hasContent() && !s.hasFormat()
 }
 
 // IsFalse will return true if Schema.Not contains a boolean schema

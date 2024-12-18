@@ -54,7 +54,8 @@ func schemaSegmentValidator(i int, segments []string) error {
 		}
 
 		return nil
-	case "not", "if", "then", "else", "items", "contains", "additionalProperties", "propertyNames":
+	case "not", "if", "then", "else", "items", "contains", "additionalProperties", "propertyNames",
+		"unevaluatedItems", "unevaluatedProperties", "contentSchema":
 		return nil
 	default:
 		if i <= 0 {

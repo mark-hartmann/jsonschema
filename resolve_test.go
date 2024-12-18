@@ -39,6 +39,15 @@ func TestResolveReference(t *testing.T) {
 				"fo~o": true,
 				"ba/r": true
 			}
+		},
+		"vocabs": {
+			"$defs": {
+				"unevaluatedItems": true,
+				"unevaluatedProperties": true,
+				"contentSchema": {
+					"$ref": "#/$defs/special-cases"
+				}
+			}
 		}
     }
 }`
@@ -258,6 +267,26 @@ func TestResolveReference(t *testing.T) {
 			name: "escaping slash",
 			args: args{ref: "#/$defs/special-cases/$defs/ba~1r", resource: root},
 			want: &Schema{},
+		},
+		{
+			name: "unevaluated items",
+			args: args{ref: "#/$defs/vocabs/$defs/unevaluatedItems", resource: root},
+			want: &True,
+		},
+		{
+			name: "unevaluated properties",
+			args: args{ref: "#/$defs/vocabs/$defs/unevaluatedProperties", resource: root},
+			want: &True,
+		},
+		{
+			name: "content schema",
+			args: args{ref: "#/$defs/vocabs/$defs/contentSchema", resource: root},
+			want: &Schema{
+				Defs: map[string]Schema{
+					"fo~o": True,
+					"ba/r": True,
+				},
+			},
 		},
 	}
 

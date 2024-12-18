@@ -66,14 +66,17 @@ func Walk(root *Schema, fn WalkFunc) error {
 
 func iter(s *Schema, cont func(string, *Schema) bool) {
 	for keyword, schema := range map[string]*Schema{
-		"not":                  s.Not,
-		"if":                   s.If,
-		"then":                 s.Then,
-		"else":                 s.Else,
-		"items":                s.Items,
-		"contains":             s.Contains,
-		"additionalProperties": s.AdditionalProperties,
-		"propertyNames":        s.PropertyNames,
+		"not":                   s.Not,
+		"if":                    s.If,
+		"then":                  s.Then,
+		"else":                  s.Else,
+		"items":                 s.Items,
+		"contains":              s.Contains,
+		"additionalProperties":  s.AdditionalProperties,
+		"propertyNames":         s.PropertyNames,
+		"unevaluatedItems":      s.UnevaluatedItems,
+		"unevaluatedProperties": s.UnevaluatedProperties,
+		"contentSchema":         s.ContentSchema,
 	} {
 		if schema == nil {
 			continue

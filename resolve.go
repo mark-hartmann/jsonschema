@@ -236,6 +236,12 @@ func resolveRef(config ResolveConfig, current *Schema, path []string, pos int) (
 			s = current.AdditionalProperties
 		case "propertyNames":
 			s = current.PropertyNames
+		case "unevaluatedItems":
+			s = current.UnevaluatedItems
+		case "unevaluatedProperties":
+			s = current.UnevaluatedProperties
+		case "contentSchema":
+			s = current.ContentSchema
 		}
 
 		if s == nil {
