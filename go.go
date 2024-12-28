@@ -116,7 +116,7 @@ func fromGoType(t reflect.Type, opts *goTypeOptions) (*Schema, error) {
 
 			s.Properties[name] = *fs
 
-			if fieldType.Kind() != reflect.Ptr && !strings.Contains(jsonTag, ",omitempty") {
+			if !strings.Contains(jsonTag, ",omitempty") {
 				s.Required = append(s.Required, name)
 			}
 		}
