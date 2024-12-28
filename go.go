@@ -7,11 +7,11 @@ import (
 )
 
 type goTypeOptions struct {
-	named map[string]Schema
+	named map[string]*Schema
 }
 
 func FromGoType(t reflect.Type) (*Schema, error) {
-	opts := &goTypeOptions{named: make(map[string]Schema)}
+	opts := &goTypeOptions{named: make(map[string]*Schema)}
 	s, err := fromGoType(t, opts)
 	if err != nil {
 		return nil, err
@@ -20,7 +20,7 @@ func FromGoType(t reflect.Type) (*Schema, error) {
 	if len(opts.named) != 0 {
 		s.Defs = make(map[string]Schema)
 		for k, v := range opts.named {
-			s.Defs[k] = v
+			s.Defs[k] = *v
 		}
 	}
 	return s, nil
@@ -76,6 +76,10 @@ func fromGoType(t reflect.Type, opts *goTypeOptions) (*Schema, error) {
 		}
 
 		s := newTyped(TypeObject, nullable)
+		if t.Name() != "" {
+			opts.named[t.Name()] = s
+		}
+
 		s.AdditionalProperties = &False
 
 		num := t.NumField()
@@ -120,8 +124,11 @@ func fromGoType(t reflect.Type, opts *goTypeOptions) (*Schema, error) {
 				s.Required = append(s.Required, name)
 			}
 		}
-		opts.named[t.Name()] = *s
-		return &Schema{Ref: "#/$defs/" + t.Name()}, nil
+
+		if t.Name() != "" {
+			return &Schema{Ref: "#/$defs/" + t.Name()}, nil
+		}
+		return s, nil
 	case reflect.Map:
 		s := Schema{}
 		s.Type = TypeSet{TypeObject}
