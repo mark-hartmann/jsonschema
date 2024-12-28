@@ -50,17 +50,10 @@ func TestFromGoType(t *testing.T) {
 		intMin   = json.Number(strconv.FormatInt(math.MinInt, 10))
 		intMax   = json.Number(strconv.FormatInt(math.MaxInt, 10))
 	)
-	type Bar struct {
-		Prop string `json:"prop1"`
-	}
 
-	type Foo struct {
-		Bar
-		Bar2 Bar
-	}
-
-	type FooBar struct {
-		Bar
+	type Comment struct {
+		Text    string    `json:"text"`
+		Replies []Comment `json:"replies,omitempty"`
 	}
 
 	tests := map[string]struct {
@@ -112,50 +105,102 @@ func TestFromGoType(t *testing.T) {
 			Required:             []string{"keys", "values"},
 			AdditionalProperties: &False,
 		}},
-		//"embedded struct": {
-		//	In: Foo{},
-		//	Out: &Schema{
-		//		Ref: "#/$defs/Foo",
-		//		Defs: map[string]Schema{
-		//			"Foo": {
-		//				Type: TypeSet{TypeObject},
-		//				Properties: map[string]Schema{
-		//					"Bar":  {Ref: "#/$defs/Bar"},
-		//					"Bar2": {Ref: "#/$defs/Bar"},
-		//				},
-		//				Required:             []string{"Bar", "Bar2"},
-		//				AdditionalProperties: &False,
-		//			},
-		//			"Bar": {
-		//				Type: TypeSet{TypeObject},
-		//				Properties: map[string]Schema{
-		//					"prop1": {Type: TypeSet{TypeString}},
-		//				},
-		//				Required:             []string{"prop1"},
-		//				AdditionalProperties: &False,
-		//			},
-		//		},
-		//	},
-		//},
-		//"recursive embedded struct": {
-		//	In: FooBar{},
-		//	Out: &Schema{
-		//		Ref: "#/$defs/FooBar",
-		//		Defs: map[string]Schema{
-		//			"FooBar": {
-		//				Type: TypeSet{TypeObject},
-		//				Properties: map[string]Schema{
-		//					"FooBar": {Ref: "#/$defs/Foo6Bar"},
-		//				},
-		//				AdditionalProperties: &False,
-		//			},
-		//		},
-		//	},
-		//},
-		//"non-root recursive embedded struct": {
-		//	In:  map[string][]FooBar{},
-		//	Out: &Schema{},
-		//},
+		"anon struct": {
+			In: struct {
+				Foo string  `json:"foo"`
+				Bar string  `json:"bar,omitempty"`
+				Baz *string `json:"baz"`
+				Qux *string `json:"qux,omitempty"`
+			}{},
+			Out: &Schema{
+				Type: TypeSet{TypeObject},
+				Properties: map[string]Schema{
+					"foo": {Type: TypeSet{TypeString}},
+					"bar": {Type: TypeSet{TypeString}},
+					"baz": {Type: TypeSet{TypeString, TypeNull}},
+					"qux": {Type: TypeSet{TypeString, TypeNull}},
+				},
+				AdditionalProperties: &False,
+				Required:             []string{"foo", "baz"},
+			},
+		},
+		"anon struct nested": {
+			In: struct {
+				Foo struct {
+					A string `json:"a"`
+				} `json:"foo"`
+				Bar struct {
+					A string `json:"a"`
+				} `json:"bar,omitempty"`
+				Baz *struct {
+					A string `json:"a"`
+				} `json:"baz"`
+				Quz *struct {
+					A string `json:"a"`
+				} `json:"qux,omitempty"`
+			}{},
+			Out: &Schema{
+				Type: TypeSet{TypeObject},
+				Properties: map[string]Schema{
+					"foo": {
+						Type: TypeSet{TypeObject},
+						Properties: map[string]Schema{
+							"a": {Type: TypeSet{TypeString}},
+						},
+						AdditionalProperties: &False,
+						Required:             []string{"a"},
+					},
+					"bar": {
+						Type: TypeSet{TypeObject},
+						Properties: map[string]Schema{
+							"a": {Type: TypeSet{TypeString}},
+						},
+						AdditionalProperties: &False,
+						Required:             []string{"a"},
+					},
+					"baz": {
+						Type: TypeSet{TypeObject, TypeNull},
+						Properties: map[string]Schema{
+							"a": {Type: TypeSet{TypeString}},
+						},
+						AdditionalProperties: &False,
+						Required:             []string{"a"},
+					},
+					"qux": {
+						Type: TypeSet{TypeObject, TypeNull},
+						Properties: map[string]Schema{
+							"a": {Type: TypeSet{TypeString}},
+						},
+						AdditionalProperties: &False,
+						Required:             []string{"a"},
+					},
+				},
+				AdditionalProperties: &False,
+				Required:             []string{"foo", "baz"},
+			},
+		},
+		"named struct": {
+			In: Comment{},
+			Out: &Schema{
+				Ref: "#/$defs/Comment",
+				Defs: map[string]Schema{
+					"Comment": {
+						Type: TypeSet{TypeObject},
+						Properties: map[string]Schema{
+							"text": {Type: TypeSet{TypeString}},
+							"replies": {
+								Type: TypeSet{TypeArray},
+								Items: &Schema{
+									Ref: "#/$defs/Comment",
+								},
+							},
+						},
+						AdditionalProperties: &False,
+						Required:             []string{"text"},
+					},
+				},
+			},
+		},
 	}
 
 	for name, test := range tests {
