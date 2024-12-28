@@ -1,10 +1,49 @@
 package jsonschema
 
 import (
+	"encoding/json"
 	"fmt"
+	"math"
 	"reflect"
+	"strconv"
 	"strings"
 )
+
+var (
+	numZero      = json.Number("0")
+	numMinInt    = json.Number(strconv.FormatInt(math.MinInt, 10))
+	numMaxInt    = json.Number(strconv.FormatInt(math.MaxInt, 10))
+	numMinInt8   = json.Number(strconv.FormatInt(math.MinInt8, 10))
+	numMaxInt8   = json.Number(strconv.FormatInt(math.MaxInt8, 10))
+	numMinInt16  = json.Number(strconv.FormatInt(math.MinInt16, 10))
+	numMaxInt16  = json.Number(strconv.FormatInt(math.MaxInt16, 10))
+	numMinInt32  = json.Number(strconv.FormatInt(math.MinInt32, 10))
+	numMaxInt32  = json.Number(strconv.FormatInt(math.MaxInt32, 10))
+	numMinInt64  = json.Number(strconv.FormatInt(math.MinInt64, 10))
+	numMaxInt64  = json.Number(strconv.FormatInt(math.MaxInt64, 10))
+	numMaxUint   = json.Number(strconv.FormatUint(math.MaxUint, 10))
+	numMaxUint8  = json.Number(strconv.FormatUint(math.MaxUint8, 10))
+	numMaxUint16 = json.Number(strconv.FormatUint(math.MaxUint16, 10))
+	numMaxUint32 = json.Number(strconv.FormatUint(math.MaxUint32, 10))
+	numMaxUint64 = json.Number(strconv.FormatUint(math.MaxUint64, 10))
+)
+
+var m = map[reflect.Kind]Schema{
+	reflect.Bool:    {Type: TypeSet{TypeBoolean}},
+	reflect.String:  {Type: TypeSet{TypeString}},
+	reflect.Float32: {Type: TypeSet{TypeNumber}},
+	reflect.Float64: {Type: TypeSet{TypeNumber}},
+	reflect.Int:     {Type: TypeSet{TypeInteger}, Minimum: &numMinInt, Maximum: &numMaxInt},
+	reflect.Int8:    {Type: TypeSet{TypeInteger}, Minimum: &numMinInt8, Maximum: &numMaxInt8},
+	reflect.Int16:   {Type: TypeSet{TypeInteger}, Minimum: &numMinInt16, Maximum: &numMaxInt16},
+	reflect.Int32:   {Type: TypeSet{TypeInteger}, Minimum: &numMinInt32, Maximum: &numMaxInt32},
+	reflect.Int64:   {Type: TypeSet{TypeInteger}, Minimum: &numMinInt64, Maximum: &numMaxInt64},
+	reflect.Uint:    {Type: TypeSet{TypeInteger}, Minimum: &numZero, Maximum: &numMaxUint},
+	reflect.Uint8:   {Type: TypeSet{TypeInteger}, Minimum: &numZero, Maximum: &numMaxUint8},
+	reflect.Uint16:  {Type: TypeSet{TypeInteger}, Minimum: &numZero, Maximum: &numMaxUint16},
+	reflect.Uint32:  {Type: TypeSet{TypeInteger}, Minimum: &numZero, Maximum: &numMaxUint32},
+	reflect.Uint64:  {Type: TypeSet{TypeInteger}, Minimum: &numZero, Maximum: &numMaxUint64},
+}
 
 type goTypeOptions struct {
 	named map[string]*Schema
