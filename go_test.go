@@ -2,20 +2,28 @@ package jsonschema_test
 
 import (
 	"encoding/json"
+	"fmt"
 	. "jsonschema"
 	"math"
 	"reflect"
+	"slices"
 	"strconv"
 	"testing"
 )
 
+// TestFromGoType_Primitives covers the basic, primitive types.
 func TestFromGoType_Primitives(t *testing.T) {
 	var (
 		uint8min = json.Number(strconv.FormatUint(0, 10))
 		uint8max = json.Number(strconv.FormatUint(math.MaxUint8, 10))
 		int16min = json.Number(strconv.FormatInt(math.MinInt16, 10))
 		int16max = json.Number(strconv.FormatInt(math.MaxInt16, 10))
+		intMin   = json.Number(strconv.FormatInt(math.MinInt, 10))
+		intMax   = json.Number(strconv.FormatInt(math.MaxInt, 10))
 	)
+
+	type IntType int
+	type StrManyPtr ***string
 
 	tests := []struct {
 		In  any
@@ -28,6 +36,28 @@ func TestFromGoType_Primitives(t *testing.T) {
 		{In: uint8(0), Out: &Schema{Type: TypeSet{TypeInteger}, Minimum: &uint8min, Maximum: &uint8max}},
 		{In: ptr(uint8(0)), Out: &Schema{Type: TypeSet{TypeInteger, TypeNull}, Minimum: &uint8min, Maximum: &uint8max}},
 		{In: int16(0), Out: &Schema{Type: TypeSet{TypeInteger}, Minimum: &int16min, Maximum: &int16max}},
+		{
+			In: IntType(0), Out: &Schema{
+				Ref: "#/$defs/IntType",
+				Defs: map[string]Schema{
+					"IntType": {
+						Type:    TypeSet{TypeInteger},
+						Minimum: &intMin,
+						Maximum: &intMax,
+					},
+				},
+			},
+		},
+		{
+			In: StrManyPtr(ptr(ptr(ptr("")))), Out: &Schema{
+				Ref: "#/$defs/StrManyPtr",
+				Defs: map[string]Schema{
+					"StrManyPtr": {
+						Type: TypeSet{TypeString, TypeNull},
+					},
+				},
+			},
+		},
 	}
 
 	for _, test := range tests {
@@ -38,74 +68,351 @@ func TestFromGoType_Primitives(t *testing.T) {
 		}
 
 		if !reflect.DeepEqual(s, test.Out) {
-			t.Errorf("is %s, expected %s", s, test.Out)
+			t.Errorf("\nhave %s\nneed %s", s, test.Out)
 		}
 	}
 }
 
-func TestFromGoType(t *testing.T) {
-	var (
-		uint8min = json.Number(strconv.FormatUint(0, 10))
-		uint8max = json.Number(strconv.FormatUint(math.MaxUint8, 10))
-		intMin   = json.Number(strconv.FormatInt(math.MinInt, 10))
-		intMax   = json.Number(strconv.FormatInt(math.MaxInt, 10))
-	)
+func TestFromGoType_Embedded(t *testing.T) {
+	type Address struct {
+		Street string `json:"street"`
+		City   string `json:"town"`
 
-	type Comment struct {
-		Text    string    `json:"text"`
-		Replies []Comment `json:"replies,omitempty"`
+		Others []Address `json:"others"`
 	}
+
+	type User struct {
+		Name string `json:"name"`
+		City string `json:"city"`
+		Address
+	}
+
+	type Foo struct {
+		A string
+	}
+
+	type Bar struct {
+		B string
+		Foo
+	}
+
+	type EmbeddedOmitEmpty struct {
+		B string `json:"b,omitempty"`
+		C string `json:"c"`
+		D string `json:"d,omitempty"`
+		E string `json:"e,omitempty"`
+		F string `json:"f"`
+	}
+
+	type MapType map[string]string
 
 	tests := map[string]struct {
 		In  any
 		Out *Schema
 	}{
-		"slice": {In: []string{}, Out: &Schema{
-			Type: TypeSet{TypeArray},
-			Items: &Schema{
-				Type: TypeSet{TypeString},
-			},
-		}},
-		"array": {In: [9]*uint8{}, Out: &Schema{
-			Type: TypeSet{TypeArray},
-			Items: &Schema{
-				Type:    TypeSet{TypeInteger, TypeNull},
-				Minimum: &uint8min,
-				Maximum: &uint8max,
-			},
-			MaxItems: ptr(9),
-		}},
-		"map": {In: map[string]uint8{}, Out: &Schema{
-			Type: TypeSet{TypeObject},
-			AdditionalProperties: &Schema{
-				Type:    TypeSet{TypeInteger},
-				Minimum: &uint8min,
-				Maximum: &uint8max,
-			},
-		}},
-		"map non-string key": {In: map[int]string{}, Out: &Schema{
-			Type: TypeSet{TypeObject},
-			Properties: map[string]Schema{
-				"keys": {
-					Type: TypeSet{TypeArray},
-					Items: &Schema{
-						Type:    TypeSet{TypeInteger},
-						Minimum: &intMin,
-						Maximum: &intMax,
-					},
-					UniqueItems: ptr(true),
+		"embedded map no json tag": {
+			In: struct {
+				MapType
+			}{},
+			Out: &Schema{
+				Type: TypeSet{TypeObject},
+				Properties: map[string]Schema{
+					"MapType": {Ref: "#/$defs/MapType"},
 				},
-				"values": {
-					Type: TypeSet{TypeArray},
-					Items: &Schema{
-						Type: TypeSet{TypeString},
+				Required:             []string{"MapType"},
+				AdditionalProperties: &False,
+				Defs: map[string]Schema{
+					"MapType": {
+						Type:                 TypeSet{TypeObject, TypeNull},
+						AdditionalProperties: &Schema{Type: TypeSet{TypeString}},
 					},
 				},
 			},
-			Required:             []string{"keys", "values"},
-			AdditionalProperties: &False,
-		}},
-		"anon struct": {
+		},
+		"embedded map omitempty": {
+			In: struct {
+				MapType `json:",omitempty"`
+			}{},
+			Out: &Schema{
+				Type: TypeSet{TypeObject},
+				Properties: map[string]Schema{
+					"MapType": {Ref: "#/$defs/MapType"},
+				},
+				AdditionalProperties: &False,
+				Defs: map[string]Schema{
+					"MapType": {
+						Type:                 TypeSet{TypeObject, TypeNull},
+						AdditionalProperties: &Schema{Type: TypeSet{TypeString}},
+					},
+				},
+			},
+		},
+		"nested embedded structs": {
+			In: struct {
+				C string
+				Bar
+			}{},
+			Out: &Schema{
+				Type: TypeSet{TypeObject},
+				Properties: map[string]Schema{
+					"A": {Type: TypeSet{TypeString}},
+					"B": {Type: TypeSet{TypeString}},
+					"C": {Type: TypeSet{TypeString}},
+				},
+				AdditionalProperties: &False,
+				Required:             []string{"C", "B", "A"},
+				Defs: map[string]Schema{
+					"Foo": {
+						Type: TypeSet{TypeObject},
+						Properties: map[string]Schema{
+							"A": {Type: TypeSet{TypeString}},
+						},
+						AdditionalProperties: &False,
+						Required:             []string{"A"},
+					},
+					"Bar": {
+						Type: TypeSet{TypeObject},
+						Properties: map[string]Schema{
+							"A": {Type: TypeSet{TypeString}},
+							"B": {Type: TypeSet{TypeString}},
+						},
+						AdditionalProperties: &False,
+						Required:             []string{"B", "A"},
+					},
+				},
+			},
+		},
+		"field priority": {
+			In: struct {
+				A bool
+				Foo
+			}{},
+			Out: &Schema{
+				Type: TypeSet{TypeObject},
+				Properties: map[string]Schema{
+					"A": {Type: TypeSet{TypeBoolean}},
+				},
+				AdditionalProperties: &False,
+				Required:             []string{"A"},
+				Defs: map[string]Schema{
+					"Foo": {
+						Type: TypeSet{TypeObject},
+						Properties: map[string]Schema{
+							"A": {Type: TypeSet{TypeString}},
+						},
+						AdditionalProperties: &False,
+						Required:             []string{"A"},
+					},
+				},
+			},
+		},
+		"embedded struct ptr with omitempty fields": {
+			In: struct {
+				A string `json:"a"`
+				*EmbeddedOmitEmpty
+			}{},
+			Out: &Schema{
+				Type: TypeSet{TypeObject},
+				Properties: map[string]Schema{
+					"a": {Type: TypeSet{TypeString}},
+					"b": {Type: TypeSet{TypeString}},
+					"c": {Type: TypeSet{TypeString}},
+					"d": {Type: TypeSet{TypeString}},
+					"e": {Type: TypeSet{TypeString}},
+					"f": {Type: TypeSet{TypeString}},
+				},
+				AdditionalProperties: &False,
+				Required:             []string{"a"},
+				DependentRequired: map[string][]string{
+					"b": {"c", "f"},
+					"c": {"f"},
+					"d": {"c", "f"},
+					"e": {"c", "f"},
+					"f": {"c"},
+				},
+				Defs: map[string]Schema{
+					"EmbeddedOmitEmpty": {
+						Type: TypeSet{TypeObject},
+						Properties: map[string]Schema{
+							"b": {Type: TypeSet{TypeString}},
+							"c": {Type: TypeSet{TypeString}},
+							"d": {Type: TypeSet{TypeString}},
+							"e": {Type: TypeSet{TypeString}},
+							"f": {Type: TypeSet{TypeString}},
+						},
+						AdditionalProperties: &False,
+						Required:             []string{"c", "f"},
+					},
+				},
+			},
+		},
+		"embedded struct overlap with custom json name": {
+			In: User{},
+			Out: &Schema{
+				Ref: "#/$defs/User",
+				Defs: map[string]Schema{
+					"User": {
+						Type: TypeSet{TypeObject},
+						Properties: map[string]Schema{
+							"name":   {Type: TypeSet{TypeString}},
+							"street": {Type: TypeSet{TypeString}},
+							"city":   {Type: TypeSet{TypeString}},
+							"town":   {Type: TypeSet{TypeString}},
+							"others": {
+								Type: TypeSet{TypeArray, TypeNull},
+								Items: &Schema{
+									Ref: "#/$defs/Address",
+								},
+							},
+						},
+						Required:             []string{"name", "city", "street", "town", "others"},
+						AdditionalProperties: &False,
+					},
+					"Address": {
+						Type: TypeSet{TypeObject},
+						Properties: map[string]Schema{
+							"street": {Type: TypeSet{TypeString}},
+							"town":   {Type: TypeSet{TypeString}},
+							"others": {
+								Type: TypeSet{TypeArray, TypeNull},
+								Items: &Schema{
+									Ref: "#/$defs/Address",
+								},
+							},
+						},
+						AdditionalProperties: &False,
+						Required:             []string{"street", "town", "others"},
+					},
+				},
+			},
+		},
+		"embedded struct ptr": {
+			In: struct {
+				*Foo
+			}{},
+			Out: &Schema{
+				Type: TypeSet{TypeObject},
+				Properties: map[string]Schema{
+					"A": {Type: TypeSet{TypeString}},
+				},
+				Defs: map[string]Schema{
+					"Foo": {
+						Type: TypeSet{TypeObject},
+						Properties: map[string]Schema{
+							"A": {Type: TypeSet{TypeString}},
+						},
+						AdditionalProperties: &False,
+						Required:             []string{"A"},
+					},
+				},
+				AdditionalProperties: &False,
+			},
+		},
+		"embedded struct json name": {
+			In: struct {
+				Foo `json:"foo"`
+			}{},
+			Out: &Schema{
+				Type: TypeSet{TypeObject},
+				Properties: map[string]Schema{
+					"foo": {Ref: "#/$defs/Foo"},
+				},
+				AdditionalProperties: &False,
+				Required:             []string{"foo"},
+				Defs: map[string]Schema{
+					"Foo": {
+						Type: TypeSet{TypeObject},
+						Properties: map[string]Schema{
+							"A": {Type: TypeSet{TypeString}},
+						},
+						AdditionalProperties: &False,
+						Required:             []string{"A"},
+					},
+				},
+			},
+		},
+		"embedded struct ptr json name": {
+			In: struct {
+				*Foo `json:"foo"`
+			}{},
+			Out: &Schema{
+				Type: TypeSet{TypeObject},
+				Properties: map[string]Schema{
+					"foo": {OneOf: []Schema{
+						{Ref: "#/$defs/Foo"},
+						{Type: TypeSet{TypeNull}},
+					}},
+				},
+				AdditionalProperties: &False,
+				Required:             []string{"foo"},
+				Defs: map[string]Schema{
+					"Foo": {
+						Type: TypeSet{TypeObject},
+						Properties: map[string]Schema{
+							"A": {Type: TypeSet{TypeString}},
+						},
+						AdditionalProperties: &False,
+						Required:             []string{"A"},
+					},
+				},
+			},
+		},
+	}
+
+	sortRequiredFn := func(ptr string, schema *Schema) error {
+		if len(schema.Required) > 0 {
+			slices.Sort(schema.Required)
+		}
+		if len(schema.DependentRequired) > 0 {
+			for _, required := range schema.DependentRequired {
+				slices.Sort(required)
+			}
+		}
+		return nil
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			s, e := FromGoType(reflect.TypeOf(test.In))
+
+			// The order of the required values is not important and may
+			// vary, so we sort them to make the tests pass.
+			_ = Walk(s, sortRequiredFn)
+			_ = Walk(test.Out, sortRequiredFn)
+
+			if e != nil {
+				fmt.Println(s)
+				t.Errorf("unexpected error: %s", e)
+				return
+			}
+
+			if !reflect.DeepEqual(s, test.Out) {
+				t.Errorf("\nhave %s\nneed %s", s, test.Out)
+			}
+		})
+	}
+}
+
+// TestFromGoType_Struct covers all struct-related cases, including anonymous
+// structs, defined structs and embedded types.
+func TestFromGoType_Struct(t *testing.T) {
+	type Comment struct {
+		Text    string    `json:"text"`
+		Replies []Comment `json:"replies,omitempty"`
+	}
+
+	type Node struct {
+		Data []byte `json:"data"`
+		Next *Node  `json:"next"`
+	}
+
+	type MapType map[string]string
+
+	tests := map[string]struct {
+		In  any
+		Out *Schema
+	}{
+		"anonymous struct": {
 			In: struct {
 				Foo string  `json:"foo"`
 				Bar string  `json:"bar,omitempty"`
@@ -124,7 +431,20 @@ func TestFromGoType(t *testing.T) {
 				Required:             []string{"foo", "baz"},
 			},
 		},
-		"anon struct nested": {
+		"pointer to anonymous struct": {
+			In: &struct {
+				Value string `json:"value"`
+			}{},
+			Out: &Schema{
+				Type: TypeSet{TypeObject, TypeNull},
+				Properties: map[string]Schema{
+					"value": {Type: TypeSet{TypeString}},
+				},
+				AdditionalProperties: &False,
+				Required:             []string{"value"},
+			},
+		},
+		"nested anonymous structs": {
 			In: struct {
 				Foo struct {
 					A string `json:"a"`
@@ -133,10 +453,10 @@ func TestFromGoType(t *testing.T) {
 					A string `json:"a"`
 				} `json:"bar,omitempty"`
 				Baz *struct {
-					A string `json:"a"`
+					A *string
 				} `json:"baz"`
 				Quz *struct {
-					A string `json:"a"`
+					A *string `json:",omitempty"`
 				} `json:"qux,omitempty"`
 			}{},
 			Out: &Schema{
@@ -161,25 +481,43 @@ func TestFromGoType(t *testing.T) {
 					"baz": {
 						Type: TypeSet{TypeObject, TypeNull},
 						Properties: map[string]Schema{
-							"a": {Type: TypeSet{TypeString}},
+							"A": {Type: TypeSet{TypeString, TypeNull}},
 						},
 						AdditionalProperties: &False,
-						Required:             []string{"a"},
+						Required:             []string{"A"},
 					},
 					"qux": {
 						Type: TypeSet{TypeObject, TypeNull},
 						Properties: map[string]Schema{
-							"a": {Type: TypeSet{TypeString}},
+							"A": {Type: TypeSet{TypeString, TypeNull}},
 						},
 						AdditionalProperties: &False,
-						Required:             []string{"a"},
 					},
 				},
 				AdditionalProperties: &False,
 				Required:             []string{"foo", "baz"},
 			},
 		},
-		"named struct": {
+		"anonymous struct with defined map field": {
+			In: struct {
+				Map MapType
+			}{},
+			Out: &Schema{
+				Type: TypeSet{TypeObject},
+				Properties: map[string]Schema{
+					"Map": {Ref: "#/$defs/MapType"},
+				},
+				Defs: map[string]Schema{
+					"MapType": {
+						Type:                 TypeSet{TypeObject, TypeNull},
+						AdditionalProperties: &Schema{Type: TypeSet{TypeString}},
+					},
+				},
+				AdditionalProperties: &False,
+				Required:             []string{"Map"},
+			},
+		},
+		"defined struct": {
 			In: Comment{},
 			Out: &Schema{
 				Ref: "#/$defs/Comment",
@@ -189,7 +527,7 @@ func TestFromGoType(t *testing.T) {
 						Properties: map[string]Schema{
 							"text": {Type: TypeSet{TypeString}},
 							"replies": {
-								Type: TypeSet{TypeArray},
+								Type: TypeSet{TypeArray, TypeNull},
 								Items: &Schema{
 									Ref: "#/$defs/Comment",
 								},
@@ -197,6 +535,221 @@ func TestFromGoType(t *testing.T) {
 						},
 						AdditionalProperties: &False,
 						Required:             []string{"text"},
+					},
+				},
+			},
+		},
+		"pointer to defined struct": {
+			In: &Comment{},
+			Out: &Schema{
+				OneOf: []Schema{
+					{Ref: "#/$defs/Comment"},
+					{Type: TypeSet{TypeNull}},
+				},
+				Defs: map[string]Schema{
+					"Comment": {
+						Type: TypeSet{TypeObject},
+						Properties: map[string]Schema{
+							"text": {Type: TypeSet{TypeString}},
+							"replies": {
+								Type: TypeSet{TypeArray, TypeNull},
+								Items: &Schema{
+									Ref: "#/$defs/Comment",
+								},
+							},
+						},
+						AdditionalProperties: &False,
+						Required:             []string{"text"},
+					},
+				},
+			},
+		},
+		"recursive struct": {
+			In: Node{},
+			Out: &Schema{
+				Ref: "#/$defs/Node",
+				Defs: map[string]Schema{
+					"Node": {
+						Type: TypeSet{TypeObject},
+						Properties: map[string]Schema{
+							"data": {
+								Type: TypeSet{TypeArray, TypeNull},
+								Items: &Schema{
+									Type:    TypeSet{TypeInteger},
+									Minimum: ptr(json.Number("0")),
+									Maximum: ptr(json.Number("255")),
+								},
+							},
+							"next": {
+								OneOf: []Schema{
+									{Ref: "#/$defs/Node"},
+									{Type: TypeSet{TypeNull}},
+								},
+							},
+						},
+						AdditionalProperties: &False,
+						Required:             []string{"data", "next"},
+					},
+				},
+			},
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			s, e := FromGoType(reflect.TypeOf(test.In))
+			if e != nil {
+				t.Errorf("unexpected error: %s", e)
+				return
+			}
+
+			if !reflect.DeepEqual(s, test.Out) {
+				t.Errorf("\nhave %s\nneed %s", s, test.Out)
+			}
+		})
+	}
+}
+
+// TestFromGoType covers slices, arrays and maps.
+func TestFromGoType(t *testing.T) {
+	var (
+		uint8min = json.Number(strconv.FormatUint(0, 10))
+		uint8max = json.Number(strconv.FormatUint(math.MaxUint8, 10))
+		intMin   = json.Number(strconv.FormatInt(math.MinInt, 10))
+		intMax   = json.Number(strconv.FormatInt(math.MaxInt, 10))
+	)
+
+	type MapType map[string]string
+	type SliceType []string
+	type ArrayType [1024]string
+	type MapTypePtr *map[string]string
+
+	var mtPtr MapTypePtr
+
+	tests := map[string]struct {
+		In  any
+		Out *Schema
+	}{
+		"slice of strings": {
+			In: []string{},
+			Out: &Schema{
+				Type: TypeSet{TypeArray, TypeNull},
+				Items: &Schema{
+					Type: TypeSet{TypeString},
+				},
+			},
+		},
+		"array of uint8 pointers": {
+			In: [9]*uint8{},
+			Out: &Schema{
+				Type: TypeSet{TypeArray, TypeNull},
+				Items: &Schema{
+					Type:    TypeSet{TypeInteger, TypeNull},
+					Minimum: &uint8min,
+					Maximum: &uint8max,
+				},
+				MaxItems: ptr(9),
+			},
+		},
+		"defined slice of strings": {
+			In: SliceType{},
+			Out: &Schema{
+				Ref: "#/$defs/SliceType",
+				Defs: map[string]Schema{
+					"SliceType": {
+						Type: TypeSet{TypeArray, TypeNull},
+						Items: &Schema{
+							Type: TypeSet{TypeString},
+						},
+					},
+				},
+			},
+		},
+		"defined array of strings": {
+			In: ArrayType{},
+			Out: &Schema{
+				Ref: "#/$defs/ArrayType",
+				Defs: map[string]Schema{
+					"ArrayType": {
+						Type: TypeSet{TypeArray, TypeNull},
+						Items: &Schema{
+							Type: TypeSet{TypeString},
+						},
+						MaxItems: ptr(1024),
+					},
+				},
+			},
+		},
+		"map with string keys and uint8 values": {
+			In: map[string]uint8{},
+			Out: &Schema{
+				Type: TypeSet{TypeObject, TypeNull},
+				AdditionalProperties: &Schema{
+					Type:    TypeSet{TypeInteger},
+					Minimum: &uint8min,
+					Maximum: &uint8max,
+				},
+			},
+		},
+		"map with int keys and string values": {
+			In: map[int]string{},
+			Out: &Schema{
+				Type: TypeSet{TypeObject, TypeNull},
+				Properties: map[string]Schema{
+					"keys": {
+						Type: TypeSet{TypeArray},
+						Items: &Schema{
+							Type:    TypeSet{TypeInteger},
+							Minimum: &intMin,
+							Maximum: &intMax,
+						},
+						UniqueItems: ptr(true),
+					},
+					"values": {
+						Type: TypeSet{TypeArray},
+						Items: &Schema{
+							Type: TypeSet{TypeString},
+						},
+					},
+				},
+				Required:             []string{"keys", "values"},
+				AdditionalProperties: &False,
+			},
+		},
+		"defined string map": {
+			In: MapType{},
+			Out: &Schema{
+				Ref: "#/$defs/MapType",
+				Defs: map[string]Schema{
+					"MapType": {
+						Type:                 TypeSet{TypeObject, TypeNull},
+						AdditionalProperties: &Schema{Type: TypeSet{TypeString}},
+					},
+				},
+			},
+		},
+		"pointer to defined string map": {
+			In: &MapType{},
+			Out: &Schema{
+				Ref: "#/$defs/MapType",
+				Defs: map[string]Schema{
+					"MapType": {
+						Type:                 TypeSet{TypeObject, TypeNull},
+						AdditionalProperties: &Schema{Type: TypeSet{TypeString}},
+					},
+				},
+			},
+		},
+		"named map ptr": {
+			In: mtPtr,
+			Out: &Schema{
+				Ref: "#/$defs/MapTypePtr",
+				Defs: map[string]Schema{
+					"MapTypePtr": {
+						Type: TypeSet{TypeObject, TypeNull},
+						AdditionalProperties: &Schema{
+							Type: TypeSet{TypeString},
+						},
 					},
 				},
 			},
