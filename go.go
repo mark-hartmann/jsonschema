@@ -7,7 +7,6 @@ import (
 	"reflect"
 	"slices"
 	"strconv"
-	"strings"
 )
 
 var (
@@ -167,12 +166,8 @@ func structType(t reflect.Type, opts *goTypeOptions) (*Schema, error) {
 		field := t.Field(i)
 		fieldType := field.Type
 
-		var name string
-		jTag := field.Tag.Get("json")
-		if jTag != "" {
-			parts := strings.Split(jTag, ",")
-			name = parts[0]
-		}
+		tag := parseJSONTag(field.Tag.Get("json"))
+		name := tag.Name()
 
 		// Embedded reference types like maps, slices and arrays are not directly
 		// embeddable, so they are handled like non-embedded fields.
@@ -191,7 +186,7 @@ func structType(t reflect.Type, opts *goTypeOptions) (*Schema, error) {
 
 		s.Properties[name] = *fs
 
-		if !strings.Contains(jTag, ",omitempty") {
+		if !tag.Contains("omitempty") {
 			s.Required = append(s.Required, name)
 		}
 	}
