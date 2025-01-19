@@ -1,6 +1,7 @@
 package jsonschema
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -149,6 +150,178 @@ func fromGoType(t reflect.Type, opts *goTypeOptions) (*Schema, error) {
 	}
 	return s, nil
 
+}
+
+type field struct {
+	name       string
+	required   bool
+	requiredIf bool
+	named      bool
+	typ        reflect.Type
+	tag        jsonTag
+	index      []int
+}
+
+func unexportedOrEmbeddedNonStruct(sf reflect.StructField) bool {
+	if sf.Anonymous {
+		t := sf.Type
+		for t.Kind() == reflect.Ptr {
+			t = t.Elem()
+		}
+		if !sf.IsExported() && t.Kind() != reflect.Struct {
+			return true
+		}
+	} else if !sf.IsExported() {
+		return true
+	}
+	return false
+}
+
+func typeFields(t reflect.Type) []field {
+	// If a type has already been visited, its fields are already inlined, any
+	// additional inclusion of fields of the same type would be removed in the
+	// end anyway.
+	visited := map[reflect.Type]bool{}
+
+	next := []field{{typ: t}}
+	var current, fields []field
+	for len(next) > 0 {
+		// Move fields from queue to current and clear queue
+		current, next = next, current[:0]
+		for _, cf := range current {
+			if visited[cf.typ] {
+				continue
+			}
+			visited[cf.typ] = true
+
+			for i := 0; i < cf.typ.NumField(); i++ {
+				sf := cf.typ.Field(i)
+				if unexportedOrEmbeddedNonStruct(sf) {
+					continue
+				}
+
+				// Unwrap the type if it is a non-defined pointer.
+				sft := sf.Type
+				if sft.Name() == "" && sft.Kind() == reflect.Pointer {
+					sft = sft.Elem()
+				}
+
+				tag := parseJSONTag(sf.Tag.Get("json"))
+				name := tag.Name()
+
+				index := make([]int, len(cf.index)+1)
+				copy(index, cf.index)
+				index[len(cf.index)] = i
+
+				// Embedded structs without json name are queued for further iterations.
+				if tag.Name() == "" && sf.Anonymous && sft.Kind() == reflect.Struct {
+					next = append(next, field{
+						name:       sft.Name(),
+						typ:        sft,
+						index:      index,
+						requiredIf: sf.Type.Kind() == reflect.Ptr,
+					})
+					continue
+				}
+
+				if tag.Name() == "" {
+					name = sf.Name
+				}
+
+				if sf.Type.Kind() == reflect.Ptr {
+					sft = reflect.PointerTo(sft)
+				}
+
+				fields = append(fields, field{
+					name:       name,
+					typ:        sft,
+					tag:        tag,
+					named:      tag.Name() != "",
+					required:   !tag.Contains("omitempty"),
+					requiredIf: cf.requiredIf,
+					index:      index,
+				})
+			}
+		}
+	}
+
+	// Sort fields in order of name, order of field index length and if
+	// they are tagged.
+	slices.SortFunc(fields, cmpFields)
+
+	// Delete all fields that are hidden by the Go rules for embedded
+	// fields, except that fields with JSON tags are promoted. Loop over
+	// names; for each name, delete hidden fields by choosing the one
+	// dominant field that survives.
+	out := fields[:0]
+	for advance, i := 0, 0; i < len(fields); i += advance {
+		// One iteration per name.
+		// Find the sequence of fields with the name of this first field.
+		fi := fields[i]
+		name := fi.name
+		for advance = 1; i+advance < len(fields); advance++ {
+			fj := fields[i+advance]
+			if fj.name != name {
+				break
+			}
+		}
+		if advance == 1 { // Only one field with this name
+			out = append(out, fi)
+			continue
+		}
+		dominant, ok := dominantField(fields[i : i+advance])
+		if ok {
+			out = append(out, dominant)
+		}
+	}
+
+	fields = out
+	slices.SortFunc(fields, cmpFieldIndexes)
+	return fields
+}
+
+func cmpFieldIndexes(a, b field) int {
+	return slices.Compare(a.index, b.index)
+}
+
+func cmpFields(a, b field) int {
+	// If the name is not equal, sort alphabetically
+	if a.name != b.name {
+		return cmp.Compare(a.name, b.name)
+	}
+	// If the fields have different nesting depths, choose the less
+	// nested one.
+	if len(a.index) != len(b.index) {
+		return cmp.Compare(len(a.index), len(b.index))
+	}
+	// If names and nesting depths are equal and one of the fields is
+	// name tagged, choose the tagged field.
+	if a.named != b.named {
+		if a.named {
+			return -1
+		}
+		return 1
+	}
+
+	// The index sequence decides if everything is the same; the
+	// lower the positions, the nearer it is to the root top level.
+	return slices.Compare(a.index, b.index)
+}
+
+// dominantField looks through the fields, all of which are known to
+// have the same name, to find the single field that dominates the
+// others using Go's embedding rules, modified by the presence of
+// JSON tags. If there are multiple top-level fields, the boolean
+// will be false: This condition is an error in Go and we skip all
+// the fields.
+func dominantField(fields []field) (field, bool) {
+	// The fields are sorted in increasing index-length order, then by presence of tag.
+	// That means that the first field is the dominant one. We need only check
+	// for error cases: two fields at top level, either both tagged or neither tagged.
+	if len(fields) > 1 && len(fields[0].index) == len(fields[1].index) && fields[0].named == fields[1].named {
+		return field{}, false
+	}
+	return fields[0], true
 }
 
 func structType(t reflect.Type, opts *goTypeOptions) (*Schema, error) {
