@@ -332,75 +332,57 @@ func structType(t reflect.Type, opts *goTypeOptions) (*Schema, error) {
 
 	s.AdditionalProperties = &False
 
-	num := t.NumField()
-	s.Properties = make(map[string]Schema, num)
-	var embeddedTypes []reflect.StructField
-	for i := 0; i < num; i++ {
-		field := t.Field(i)
-		fieldType := field.Type
+	fields := typeFields(t)
+	s.Properties = make(map[string]Schema, len(fields))
 
-		tag := parseJSONTag(field.Tag.Get("json"))
-		name := tag.Name()
-
-		// Embedded reference types like maps, slices and arrays are not directly
-		// embeddable, so they are handled like non-embedded fields.
-		if field.Anonymous && name == "" && !isRefType(fieldType) {
-			embeddedTypes = append(embeddedTypes, field)
-			continue
-		}
-
-		if name == "" {
-			name = field.Name
-		}
-		fs, err := fromGoType(fieldType, opts)
+	var hasDependent bool
+	for i := 0; i < len(fields); i++ {
+		x := fields[i]
+		fs, err := fromGoType(x.typ, opts)
 		if err != nil {
-			return nil, fmt.Errorf("schema.FromGoType: %w", err)
+			return nil, fmt.Errorf("schema.FromGoType: %s: %w", x.typ, err)
 		}
 
-		s.Properties[name] = *fs
+		s.Properties[x.name] = *fs
+		if x.required && !x.requiredIf {
+			s.Required = append(s.Required, x.name)
+		}
 
-		if !tag.Contains("omitempty") {
-			s.Required = append(s.Required, name)
+		if !hasDependent && x.requiredIf {
+			hasDependent = true
 		}
 	}
 
-	for _, field := range embeddedTypes {
-		// Only defined types are embeddable, so we know we will get a
-		// reference or oneOf if it's a reference
-		fieldType := field.Type
-		isPtr := fieldType.Kind() == reflect.Ptr
-		if isPtr {
-			fieldType = fieldType.Elem()
-		}
-
-		fs, err := fromGoType(fieldType, opts)
-		if err != nil {
-			return nil, fmt.Errorf("schema.FromGoType: %w", err)
-		}
-
-		embedded := opts.named[fs.Ref[8:]]
-
-		var required, optional []string
-		for name, schema := range embedded.Properties {
-			if _, ok := s.Properties[name]; ok {
-				continue
-			}
-			s.Properties[name] = schema
-
-			isRequired := slices.Contains(embedded.Required, name)
-			if !isRequired {
-				optional = append(optional, name)
-			} else {
-				required = append(required, name)
-			}
-
-			if slices.Contains(embedded.Required, name) && !isPtr {
-				s.Required = append(s.Required, name)
+	// Build dependent required map
+	if hasDependent {
+		maxDepth := 1
+		for i := 0; i < len(fields); i++ {
+			if len(fields[i].index) > maxDepth {
+				maxDepth++
 			}
 		}
 
-		if isPtr && len(optional) > 0 && len(optional) > 0 {
-			s.DependentRequired = buildDependentRequired(required, optional)
+		layers := make([][]int, maxDepth)
+		for i := 0; i < len(fields); i++ {
+			j := len(fields[i].index) - 1
+			layers[j] = append(layers[j], i)
+		}
+		var req, opt []string
+		for i := 0; i < len(layers); i++ {
+			for j := 0; j < len(layers[i]); j++ {
+				f := fields[layers[i][j]]
+				if !f.requiredIf {
+					continue
+				}
+				if f.required {
+					req = append(req, f.name)
+				} else {
+					opt = append(opt, f.name)
+				}
+			}
+		}
+		if dr := buildDependentRequired(req, opt); len(dr) > 0 {
+			s.DependentRequired = dr
 		}
 	}
 

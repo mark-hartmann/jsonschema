@@ -2,11 +2,9 @@ package jsonschema_test
 
 import (
 	"encoding/json"
-	"fmt"
 	. "jsonschema"
 	"math"
 	"reflect"
-	"slices"
 	"strconv"
 	"testing"
 )
@@ -161,25 +159,6 @@ func TestFromGoType_Embedded(t *testing.T) {
 				},
 				AdditionalProperties: &False,
 				Required:             []string{"C", "B", "A"},
-				Defs: map[string]Schema{
-					"Foo": {
-						Type: TypeSet{TypeObject},
-						Properties: map[string]Schema{
-							"A": {Type: TypeSet{TypeString}},
-						},
-						AdditionalProperties: &False,
-						Required:             []string{"A"},
-					},
-					"Bar": {
-						Type: TypeSet{TypeObject},
-						Properties: map[string]Schema{
-							"A": {Type: TypeSet{TypeString}},
-							"B": {Type: TypeSet{TypeString}},
-						},
-						AdditionalProperties: &False,
-						Required:             []string{"B", "A"},
-					},
-				},
 			},
 		},
 		"field priority": {
@@ -194,16 +173,6 @@ func TestFromGoType_Embedded(t *testing.T) {
 				},
 				AdditionalProperties: &False,
 				Required:             []string{"A"},
-				Defs: map[string]Schema{
-					"Foo": {
-						Type: TypeSet{TypeObject},
-						Properties: map[string]Schema{
-							"A": {Type: TypeSet{TypeString}},
-						},
-						AdditionalProperties: &False,
-						Required:             []string{"A"},
-					},
-				},
 			},
 		},
 		"embedded struct ptr with omitempty fields": {
@@ -229,20 +198,6 @@ func TestFromGoType_Embedded(t *testing.T) {
 					"d": {"c", "f"},
 					"e": {"c", "f"},
 					"f": {"c"},
-				},
-				Defs: map[string]Schema{
-					"EmbeddedOmitEmpty": {
-						Type: TypeSet{TypeObject},
-						Properties: map[string]Schema{
-							"b": {Type: TypeSet{TypeString}},
-							"c": {Type: TypeSet{TypeString}},
-							"d": {Type: TypeSet{TypeString}},
-							"e": {Type: TypeSet{TypeString}},
-							"f": {Type: TypeSet{TypeString}},
-						},
-						AdditionalProperties: &False,
-						Required:             []string{"c", "f"},
-					},
 				},
 			},
 		},
@@ -294,16 +249,6 @@ func TestFromGoType_Embedded(t *testing.T) {
 				Type: TypeSet{TypeObject},
 				Properties: map[string]Schema{
 					"A": {Type: TypeSet{TypeString}},
-				},
-				Defs: map[string]Schema{
-					"Foo": {
-						Type: TypeSet{TypeObject},
-						Properties: map[string]Schema{
-							"A": {Type: TypeSet{TypeString}},
-						},
-						AdditionalProperties: &False,
-						Required:             []string{"A"},
-					},
 				},
 				AdditionalProperties: &False,
 			},
@@ -359,29 +304,11 @@ func TestFromGoType_Embedded(t *testing.T) {
 		},
 	}
 
-	sortRequiredFn := func(ptr string, schema *Schema) error {
-		if len(schema.Required) > 0 {
-			slices.Sort(schema.Required)
-		}
-		if len(schema.DependentRequired) > 0 {
-			for _, required := range schema.DependentRequired {
-				slices.Sort(required)
-			}
-		}
-		return nil
-	}
-
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
 			s, e := FromGoType(reflect.TypeOf(test.In))
 
-			// The order of the required values is not important and may
-			// vary, so we sort them to make the tests pass.
-			_ = Walk(s, sortRequiredFn)
-			_ = Walk(test.Out, sortRequiredFn)
-
 			if e != nil {
-				fmt.Println(s)
 				t.Errorf("unexpected error: %s", e)
 				return
 			}
@@ -414,10 +341,10 @@ func TestFromGoType_Struct(t *testing.T) {
 	}{
 		"anonymous struct": {
 			In: struct {
-				Foo string  `json:"foo"`
-				Bar string  `json:"bar,omitempty"`
-				Baz *string `json:"baz"`
-				Qux *string `json:"qux,omitempty"`
+				Foo string   `json:"foo"`
+				Bar string   `json:"bar,omitempty"`
+				Baz *string  `json:"baz"`
+				Qux **string `json:"qux,omitempty"`
 			}{},
 			Out: &Schema{
 				Type: TypeSet{TypeObject},
