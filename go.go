@@ -352,6 +352,13 @@ var (
 	patternFractional  = regexp.MustCompile(`^-?(0|[1-9]\d*)(\.\d+)?$`)
 )
 
+func patternSchema(regexp *regexp.Regexp) *Schema {
+	return &Schema{
+		Type:    TypeSet{TypeString},
+		Pattern: ptr(regexp.String()),
+	}
+}
+
 func structType(t reflect.Type, opts *goTypeOptions) (*Schema, error) {
 	s := &Schema{Type: TypeSet{TypeObject}}
 	if t.Name() != "" {
@@ -376,11 +383,11 @@ func structType(t reflect.Type, opts *goTypeOptions) (*Schema, error) {
 			case reflect.Bool:
 				fs = &Schema{Enum: []any{"true", "false"}}
 			case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-				fs = &Schema{Type: TypeSet{TypeString}, Pattern: ptr(patternSignedInt.String())}
+				fs = patternSchema(patternSignedInt)
 			case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-				fs = &Schema{Type: TypeSet{TypeString}, Pattern: ptr(patternUnsignedInt.String())}
+				fs = patternSchema(patternUnsignedInt)
 			case reflect.Float32, reflect.Float64:
-				fs = &Schema{Type: TypeSet{TypeString}, Pattern: ptr(patternFractional.String())}
+				fs = patternSchema(patternFractional)
 			default:
 			}
 		} else {
