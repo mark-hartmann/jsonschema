@@ -320,6 +320,14 @@ func TestFromGoType_Embedded(t *testing.T) {
 	}
 }
 
+type A struct {
+	B
+}
+
+type B struct {
+	Name string
+}
+
 // TestFromGoType_Struct covers all struct-related cases, including anonymous
 // structs, defined structs and embedded types.
 func TestFromGoType_Struct(t *testing.T) {
@@ -522,10 +530,26 @@ func TestFromGoType_Struct(t *testing.T) {
 				},
 			},
 		},
+		"cyclic embedded": {
+			In: struct {
+				A
+				B
+			}{},
+			Out: &Schema{
+				Type: TypeSet{TypeObject},
+				Properties: map[string]Schema{
+					"Name": {Type: TypeSet{TypeString}},
+				},
+				AdditionalProperties: &False,
+				Required:             []string{"Name"},
+			},
+		},
 		"ignore": {
 			In: struct {
 				A string `json:"-,omitempty"`
 				B string `json:"-"`
+				c string
+				boolean
 			}{},
 			Out: &Schema{
 				Type: TypeSet{TypeObject},
