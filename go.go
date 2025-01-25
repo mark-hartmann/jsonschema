@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"regexp"
 	"slices"
 	"strconv"
 )
@@ -160,6 +161,7 @@ type field struct {
 	typ        reflect.Type
 	tag        jsonTag
 	index      []int
+	quoted     bool
 }
 
 func unexportedOrEmbeddedNonStruct(sf reflect.StructField) bool {
@@ -206,7 +208,13 @@ func typeFields(t reflect.Type) []field {
 					sft = sft.Elem()
 				}
 
-				tag := parseJSONTag(sf.Tag.Get("json"))
+				var tag jsonTag
+				if rawTag := sf.Tag.Get("json"); rawTag != "-" {
+					tag = parseJSONTag(sf.Tag.Get("json"))
+				} else {
+					continue
+				}
+
 				name := tag.Name()
 
 				index := make([]int, len(cf.index)+1)
@@ -228,6 +236,19 @@ func typeFields(t reflect.Type) []field {
 					name = sf.Name
 				}
 
+				// Only strings, floats, integers, and booleans can be quoted.
+				quoted := false
+				if tag.Contains("string") {
+					switch sft.Kind() {
+					case reflect.Bool,
+						reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+						reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr,
+						reflect.Float32, reflect.Float64,
+						reflect.String:
+						quoted = true
+					}
+				}
+
 				if sf.Type.Kind() == reflect.Ptr {
 					sft = reflect.PointerTo(sft)
 				}
@@ -240,6 +261,7 @@ func typeFields(t reflect.Type) []field {
 					required:   !tag.Contains("omitempty"),
 					requiredIf: cf.requiredIf,
 					index:      index,
+					quoted:     quoted,
 				})
 			}
 		}
@@ -324,6 +346,12 @@ func dominantField(fields []field) (field, bool) {
 	return fields[0], true
 }
 
+var (
+	patternSignedInt   = regexp.MustCompile(`^-?(0|[1-9]\d*)$`)
+	patternUnsignedInt = regexp.MustCompile(`^(0|[1-9]\d*)$`)
+	patternFractional  = regexp.MustCompile(`^-?(0|[1-9]\d*)(\.\d+)?$`)
+)
+
 func structType(t reflect.Type, opts *goTypeOptions) (*Schema, error) {
 	s := &Schema{Type: TypeSet{TypeObject}}
 	if t.Name() != "" {
@@ -333,17 +361,36 @@ func structType(t reflect.Type, opts *goTypeOptions) (*Schema, error) {
 	s.AdditionalProperties = &False
 
 	fields := typeFields(t)
-	s.Properties = make(map[string]Schema, len(fields))
+	properties := make(map[string]Schema, len(fields))
 
 	var hasDependent bool
 	for i := 0; i < len(fields); i++ {
 		x := fields[i]
-		fs, err := fromGoType(x.typ, opts)
+
+		var (
+			fs  *Schema
+			err error
+		)
+		if x.quoted {
+			switch x.typ.Kind() {
+			case reflect.Bool:
+				fs = &Schema{Enum: []any{"true", "false"}}
+			case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+				fs = &Schema{Type: TypeSet{TypeString}, Pattern: ptr(patternSignedInt.String())}
+			case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+				fs = &Schema{Type: TypeSet{TypeString}, Pattern: ptr(patternUnsignedInt.String())}
+			case reflect.Float32, reflect.Float64:
+				fs = &Schema{Type: TypeSet{TypeString}, Pattern: ptr(patternFractional.String())}
+			default:
+			}
+		} else {
+			fs, err = fromGoType(x.typ, opts)
+		}
 		if err != nil {
 			return nil, fmt.Errorf("schema.FromGoType: %s: %w", x.typ, err)
 		}
 
-		s.Properties[x.name] = *fs
+		properties[x.name] = *fs
 		if x.required && !x.requiredIf {
 			s.Required = append(s.Required, x.name)
 		}
@@ -351,6 +398,10 @@ func structType(t reflect.Type, opts *goTypeOptions) (*Schema, error) {
 		if !hasDependent && x.requiredIf {
 			hasDependent = true
 		}
+	}
+
+	if len(properties) > 0 {
+		s.Properties = properties
 	}
 
 	// Build dependent required map
@@ -381,8 +432,9 @@ func structType(t reflect.Type, opts *goTypeOptions) (*Schema, error) {
 				}
 			}
 		}
-		if dr := buildDependentRequired(req, opt); len(dr) > 0 {
-			s.DependentRequired = dr
+
+		if len(req) > 0 && len(opt) > 0 {
+			s.DependentRequired = buildDependentRequired(req, opt)
 		}
 	}
 

@@ -335,6 +335,8 @@ func TestFromGoType_Struct(t *testing.T) {
 
 	type MapType map[string]string
 
+	type boolean bool
+
 	tests := map[string]struct {
 		In  any
 		Out *Schema
@@ -518,6 +520,62 @@ func TestFromGoType_Struct(t *testing.T) {
 						Required:             []string{"data", "next"},
 					},
 				},
+			},
+		},
+		"ignore": {
+			In: struct {
+				A string `json:"-,omitempty"`
+				B string `json:"-"`
+			}{},
+			Out: &Schema{
+				Type: TypeSet{TypeObject},
+				Properties: map[string]Schema{
+					"-": {Type: TypeSet{TypeString}},
+				},
+				AdditionalProperties: &False,
+			},
+		},
+		"nullable object without properties": {
+			In: &struct {
+				A string `json:"-"`
+			}{},
+			Out: &Schema{
+				Type:                 TypeSet{TypeObject, TypeNull},
+				AdditionalProperties: &False,
+			},
+		},
+		"quoted": {
+			In: struct {
+				A bool    `json:",string"`
+				B boolean `json:",string"`
+				C uint16  `json:",string"`
+				D int8    `json:",string"`
+				E float32 `json:",string"`
+			}{},
+			Out: &Schema{
+				Type: TypeSet{TypeObject},
+				Properties: map[string]Schema{
+					"A": {
+						Enum: []any{"true", "false"},
+					},
+					"B": {
+						Enum: []any{"true", "false"},
+					},
+					"C": {
+						Type:    TypeSet{TypeString},
+						Pattern: ptr(`^(0|[1-9]\d*)$`),
+					},
+					"D": {
+						Type:    TypeSet{TypeString},
+						Pattern: ptr(`^-?(0|[1-9]\d*)$`),
+					},
+					"E": {
+						Type:    TypeSet{TypeString},
+						Pattern: ptr(`^-?(0|[1-9]\d*)(\.\d+)?$`),
+					},
+				},
+				AdditionalProperties: &False,
+				Required:             []string{"A", "B", "C", "D", "E"},
 			},
 		},
 	}
