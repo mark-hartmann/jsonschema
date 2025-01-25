@@ -165,14 +165,20 @@ func TestFromGoType_Embedded(t *testing.T) {
 			In: struct {
 				A bool
 				Foo
+				Bar  string
+				Baz  bool `json:"Bar"`
+				Qux  bool `json:"Quux"`
+				Quux string
 			}{},
 			Out: &Schema{
 				Type: TypeSet{TypeObject},
 				Properties: map[string]Schema{
-					"A": {Type: TypeSet{TypeBoolean}},
+					"A":    {Type: TypeSet{TypeBoolean}},
+					"Bar":  {Type: TypeSet{TypeBoolean}},
+					"Quux": {Type: TypeSet{TypeBoolean}},
 				},
 				AdditionalProperties: &False,
-				Required:             []string{"A"},
+				Required:             []string{"A", "Bar", "Quux"},
 			},
 		},
 		"embedded struct ptr with omitempty fields": {
