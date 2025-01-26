@@ -52,6 +52,9 @@ type goTypeOptions struct {
 }
 
 func FromGoType(t reflect.Type) (*Schema, error) {
+	if t == nil || (t.Kind() == reflect.Interface && t.NumMethod() == 0) {
+		return &True, nil
+	}
 	opts := &goTypeOptions{named: make(map[string]*Schema)}
 	s, err := fromGoType(t, opts)
 	if err != nil {
@@ -138,6 +141,11 @@ func fromGoType(t reflect.Type, opts *goTypeOptions) (*Schema, error) {
 		s, err = structType(t, opts)
 	case reflect.Map:
 		s, err = mapType(t, opts)
+	case reflect.Interface:
+		if t.NumMethod() == 0 {
+			return &True, nil
+		}
+		fallthrough
 	default:
 		return nil, fmt.Errorf("cannot map Go type: %v", t)
 	}
