@@ -2,6 +2,7 @@ package jsonschema_test
 
 import (
 	"encoding/json"
+	"fmt"
 	. "jsonschema"
 	"math"
 	"reflect"
@@ -641,9 +642,12 @@ func TestFromGoType(t *testing.T) {
 
 	var mtPtr MapTypePtr
 
+	var emptyInterface any
+
 	tests := map[string]struct {
 		In  any
 		Out *Schema
+		Err error
 	}{
 		"slice of strings": {
 			In: []string{},
@@ -769,17 +773,76 @@ func TestFromGoType(t *testing.T) {
 				},
 			},
 		},
+		"empty interface value": {
+			In:  emptyInterface,
+			Out: &True,
+		},
+		"empty interface fields": {
+			In: struct {
+				A any `json:",omitempty"`
+			}{},
+			Out: &Schema{
+				Type: TypeSet{TypeObject},
+				Properties: map[string]Schema{
+					"A": True,
+				},
+				AdditionalProperties: &False,
+			},
+		},
+		"channel": {
+			In:  make(chan int),
+			Err: fmt.Errorf("schema.FromGoType: cannot map Go type chan int"),
+		},
+		"interface field": {
+			In: struct {
+				A interface{ Print() }
+			}{},
+			Err: fmt.Errorf(`schema.FromGoType: field "A": cannot map Go type interface { Print() }`),
+		},
+		"invalid array type": {
+			In:  []chan int{},
+			Err: fmt.Errorf(`schema.FromGoType: invalid array element type: cannot map Go type chan int`),
+		},
+		"invalid map key": {
+			In:  map[complex128]string{},
+			Err: fmt.Errorf(`schema.FromGoType: invalid map key: cannot map Go type complex128`),
+		},
+		"invalid map value": {
+			In:  map[uint8]complex128{},
+			Err: fmt.Errorf(`schema.FromGoType: invalid map value: cannot map Go type complex128`),
+		},
+		"invalid string map value": {
+			In: struct {
+				A struct {
+					B map[string]chan int
+				}
+			}{},
+			Err: fmt.Errorf(`schema.FromGoType: field "A": field "B": invalid map value: cannot map Go type chan int`),
+		},
+		"pointer to invalid type": {
+			In: struct {
+				A ****func()
+			}{},
+			Err: fmt.Errorf(`schema.FromGoType: field "A": cannot map Go type func()`),
+		},
 	}
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
 			s, e := FromGoType(reflect.TypeOf(test.In))
-			if e != nil {
+			if e != nil && test.Err == nil {
 				t.Errorf("unexpected error: %s", e)
 				return
 			}
 
-			if !reflect.DeepEqual(s, test.Out) {
+			if test.Err != nil && e == nil {
+				t.Errorf("expected error, got nil")
+				return
+			}
+
+			if test.Err != nil && e.Error() != test.Err.Error() {
+				t.Errorf("\nhave %s\nneed %s", e, test.Err)
+			} else if !reflect.DeepEqual(s, test.Out) {
 				t.Errorf("\nhave %s\nneed %s", s, test.Out)
 			}
 		})
