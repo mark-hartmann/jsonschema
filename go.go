@@ -58,7 +58,7 @@ func FromGoType(t reflect.Type) (*Schema, error) {
 	opts := &goTypeOptions{named: make(map[string]*Schema)}
 	s, err := fromGoType(t, opts)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("schema.FromGoType: %w", err)
 	}
 
 	if len(opts.named) != 0 {
@@ -147,11 +147,11 @@ func fromGoType(t reflect.Type, opts *goTypeOptions) (*Schema, error) {
 		}
 		fallthrough
 	default:
-		return nil, fmt.Errorf("cannot map Go type: %v", t)
+		return nil, fmt.Errorf("cannot map Go type %s", t)
 	}
 
 	if err != nil {
-		return nil, fmt.Errorf("schema.FromGoType: %w", err)
+		return nil, err
 	}
 	*schema = *s
 	if defined {
@@ -402,7 +402,7 @@ func structType(t reflect.Type, opts *goTypeOptions) (*Schema, error) {
 			fs, err = fromGoType(x.typ, opts)
 		}
 		if err != nil {
-			return nil, fmt.Errorf("schema.FromGoType: %s: %w", x.typ, err)
+			return nil, fmt.Errorf("field %q: %w", x.name, err)
 		}
 
 		properties[x.name] = *fs
@@ -482,7 +482,7 @@ func arrType(t reflect.Type, opts *goTypeOptions) (*Schema, error) {
 
 	var err error
 	if s.Items, err = fromGoType(t.Elem(), opts); err != nil {
-		return nil, fmt.Errorf("failed to generate schema for array element type (%s): %w", t.Elem(), err)
+		return nil, fmt.Errorf("invalid array element type: %w", err)
 	}
 	return s, nil
 }
@@ -493,18 +493,18 @@ func mapType(t reflect.Type, opts *goTypeOptions) (*Schema, error) {
 		s := Schema{Type: TypeSet{TypeObject, TypeNull}}
 		var err error
 		if s.AdditionalProperties, err = fromGoType(valType, opts); err != nil {
-			return nil, fmt.Errorf("failed to generate schema for map value type (%s): %w", keyType.Kind(), err)
+			return nil, fmt.Errorf("invalid map value: %w", err)
 		}
 		return &s, nil
 	}
 
 	ks, err := fromGoType(keyType, opts)
 	if err != nil {
-		return nil, fmt.Errorf("failed to generate schema for map key type (%s): %w", keyType.Kind(), err)
+		return nil, fmt.Errorf("invalid map key: %w", err)
 	}
 	vs, err := fromGoType(valType, opts)
 	if err != nil {
-		return nil, fmt.Errorf("failed to generate schema for map value type (%s): %w", keyType.Kind(), err)
+		return nil, fmt.Errorf("invalid map value: %w", err)
 	}
 
 	s := &Schema{
