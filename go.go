@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
+	"sync"
 )
 
 var (
@@ -48,23 +49,61 @@ var m = map[reflect.Kind]Schema{
 }
 
 type goTypeOptions struct {
-	named map[string]*Schema
+	defs *typeRegistry
+}
+
+type typeEntry struct {
+	t reflect.Type
+	s *Schema
+
+	name string
+}
+
+type typeRegistry struct {
+	sync.Mutex
+	types map[reflect.Type]typeEntry
+}
+
+func (r *typeRegistry) Load(t reflect.Type) (*Schema, bool) {
+	r.Lock()
+	e, ok := r.types[t]
+	r.Unlock()
+	if !ok {
+		return nil, false
+	}
+	return e.s, ok
+}
+
+func (r *typeRegistry) Store(t reflect.Type, schema *Schema) bool {
+	r.Lock()
+	_, ok := r.types[t]
+	if !ok {
+		r.types[t] = typeEntry{
+			s:    schema,
+			t:    t,
+			name: t.Name(),
+		}
+	}
+	r.Unlock()
+	return !ok
 }
 
 func FromGoType(t reflect.Type) (*Schema, error) {
 	if t == nil || (t.Kind() == reflect.Interface && t.NumMethod() == 0) {
 		return &True, nil
 	}
-	opts := &goTypeOptions{named: make(map[string]*Schema)}
+	opts := &goTypeOptions{
+		defs: &typeRegistry{types: make(map[reflect.Type]typeEntry)},
+	}
 	s, err := fromGoType(t, opts)
 	if err != nil {
 		return nil, fmt.Errorf("schema.FromGoType: %w", err)
 	}
 
-	if len(opts.named) != 0 {
-		s.Defs = make(map[string]Schema)
-		for k, v := range opts.named {
-			s.Defs[k] = *v
+	if l := len(opts.defs.types); l != 0 {
+		s.Defs = make(map[string]Schema, l)
+		for _, v := range opts.defs.types {
+			s.Defs[v.name] = *v.s
 		}
 	}
 	return s, nil
@@ -88,11 +127,16 @@ func isRefType(t reflect.Type) bool {
 }
 
 func fromGoType(t reflect.Type, opts *goTypeOptions) (*Schema, error) {
-	schema, defined := &Schema{}, false
-	if _, defined = opts.named[t.Name()]; defined {
+	schema, defined, defs := &Schema{}, false, opts.defs
+
+	if _, found := defs.Load(t); found {
 		return newReference(t), nil
 	} else if t.PkgPath() != "" && t.Name() != "" {
-		opts.named[t.Name()] = schema
+		// It's a defined type, we can store the empty schema and reference it down
+		// the line if necessary. If further calls to fromGoType encounter a defined
+		// type that has already been marked as known, a referring schema can be
+		// returned.
+		defs.Store(t, schema)
 		defined = true
 	}
 
@@ -369,10 +413,6 @@ func patternSchema(regexp *regexp.Regexp) *Schema {
 
 func structType(t reflect.Type, opts *goTypeOptions) (*Schema, error) {
 	s := &Schema{Type: TypeSet{TypeObject}}
-	if t.Name() != "" {
-		opts.named[t.Name()] = s
-	}
-
 	s.AdditionalProperties = &False
 
 	fields := typeFields(t)
@@ -453,9 +493,6 @@ func structType(t reflect.Type, opts *goTypeOptions) (*Schema, error) {
 		}
 	}
 
-	if t.Name() != "" {
-		return &Schema{Ref: "#/$defs/" + t.Name()}, nil
-	}
 	return s, nil
 }
 
