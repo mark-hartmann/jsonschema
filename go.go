@@ -165,8 +165,8 @@ func fromGoType(t reflect.Type, opts *goTypeOptions) (*Schema, error) {
 	}
 
 	// if primitive, we can return early because they are predefined.
-	if _, ok := m[t.Kind()]; ok {
-		*schema = m[t.Kind()]
+	if s, ok := m[t.Kind()]; ok {
+		*schema = s
 		if defined {
 			return newReference(t), nil
 		}
