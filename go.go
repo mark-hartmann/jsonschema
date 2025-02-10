@@ -61,7 +61,8 @@ type typeEntry struct {
 
 type typeRegistry struct {
 	sync.Mutex
-	types map[reflect.Type]typeEntry
+	types  map[reflect.Type]typeEntry
+	nameFn func(t reflect.Type) string
 }
 
 func (r *typeRegistry) Load(t reflect.Type) (*Schema, bool) {
@@ -81,19 +82,32 @@ func (r *typeRegistry) Store(t reflect.Type, schema *Schema) bool {
 		r.types[t] = typeEntry{
 			s:    schema,
 			t:    t,
-			name: t.Name(),
+			name: r.nameFn(t),
 		}
 	}
 	r.Unlock()
 	return !ok
 }
 
+func (r *typeRegistry) Ref(t reflect.Type) (rs *Schema) {
+	r.Lock()
+	if e, ok := r.types[t]; ok {
+		rs = &Schema{Ref: "#/$defs/" + e.name}
+	}
+	r.Unlock()
+	return
+}
 func FromGoType(t reflect.Type) (*Schema, error) {
 	if t == nil || (t.Kind() == reflect.Interface && t.NumMethod() == 0) {
 		return &True, nil
 	}
 	opts := &goTypeOptions{
-		defs: &typeRegistry{types: make(map[reflect.Type]typeEntry)},
+		defs: &typeRegistry{
+			types: make(map[reflect.Type]typeEntry),
+			nameFn: func(t reflect.Type) string {
+				return t.Name()
+			},
+		},
 	}
 	s, err := fromGoType(t, opts)
 	if err != nil {
@@ -118,10 +132,6 @@ func newTyped(t Type, nullable bool) *Schema {
 	return &s
 }
 
-func newReference(t reflect.Type) *Schema {
-	return &Schema{Ref: "#/$defs/" + t.Name()}
-}
-
 func isRefType(t reflect.Type) bool {
 	return t.Kind() == reflect.Map || t.Kind() == reflect.Array || t.Kind() == reflect.Slice
 }
@@ -130,7 +140,7 @@ func fromGoType(t reflect.Type, opts *goTypeOptions) (*Schema, error) {
 	schema, defined, defs := &Schema{}, false, opts.defs
 
 	if _, found := defs.Load(t); found {
-		return newReference(t), nil
+		return defs.Ref(t), nil
 	} else if t.PkgPath() != "" && t.Name() != "" {
 		// It's a defined type, we can store the empty schema and reference it down
 		// the line if necessary. If further calls to fromGoType encounter a defined
@@ -161,14 +171,14 @@ func fromGoType(t reflect.Type, opts *goTypeOptions) (*Schema, error) {
 		if !defined {
 			return schema, nil
 		}
-		return newReference(t), nil
+		return defs.Ref(t), nil
 	}
 
 	// if primitive, we can return early because they are predefined.
 	if s, ok := m[t.Kind()]; ok {
 		*schema = s
 		if defined {
-			return newReference(t), nil
+			return defs.Ref(t), nil
 		}
 		return schema, nil
 	}
@@ -199,7 +209,7 @@ func fromGoType(t reflect.Type, opts *goTypeOptions) (*Schema, error) {
 	}
 	*schema = *s
 	if defined {
-		return newReference(t), nil
+		return defs.Ref(t), nil
 	}
 	return s, nil
 
