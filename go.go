@@ -50,6 +50,12 @@ var m = map[reflect.Kind]Schema{
 
 type goTypeOptions struct {
 	defs *typeRegistry
+
+	// RefTypesNotNullable controls whether Go reference types are implicitly nullable
+	// or must be provided via an empty instance. If false, a TypeSet containing TypeNull
+	// is generated, otherwise it is just TypeArray or TypeObject. This option has no
+	// effect on pointers to reference types.
+	RefTypesNotNullable bool
 }
 
 type typeEntry struct {
@@ -522,7 +528,7 @@ func buildDependentRequired(required, options []string) map[string][]string {
 }
 
 func arrType(t reflect.Type, opts *goTypeOptions) (*Schema, error) {
-	s := newTyped(TypeArray, true)
+	s := newTyped(TypeArray, !opts.RefTypesNotNullable)
 	if t.Kind() == reflect.Array {
 		s.MaxItems = ptr(t.Len())
 	}
@@ -537,12 +543,12 @@ func arrType(t reflect.Type, opts *goTypeOptions) (*Schema, error) {
 func mapType(t reflect.Type, opts *goTypeOptions) (*Schema, error) {
 	keyType, valType := t.Key(), t.Elem()
 	if keyType.Kind() == reflect.String {
-		s := Schema{Type: TypeSet{TypeObject, TypeNull}}
+		s := newTyped(TypeObject, !opts.RefTypesNotNullable)
 		var err error
 		if s.AdditionalProperties, err = fromGoType(valType, opts); err != nil {
 			return nil, fmt.Errorf("invalid map value: %w", err)
 		}
-		return &s, nil
+		return s, nil
 	}
 
 	ks, err := fromGoType(keyType, opts)
