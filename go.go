@@ -48,8 +48,16 @@ var m = map[reflect.Kind]Schema{
 	reflect.Uint64:  {Type: TypeSet{TypeInteger}, Minimum: &numZero, Maximum: &numMaxUint64},
 }
 
+// TypeRepository manages known schema definitions for Go types and allow the
+// saving of new schemas as well as the loading and referencing of known schemas.
+type TypeRepository interface {
+	Load(t reflect.Type) (*Schema, bool)
+	Store(t reflect.Type, schema *Schema) bool
+	Ref(t reflect.Type) *Schema
+}
+
 type goTypeOptions struct {
-	defs *typeRegistry
+	Types TypeRepository
 
 	// RefTypesNotNullable controls whether Go reference types are implicitly nullable
 	// or must be provided via an empty instance. If false, a TypeSet containing TypeNull
@@ -107,22 +115,21 @@ func FromGoType(t reflect.Type) (*Schema, error) {
 	if t == nil || (t.Kind() == reflect.Interface && t.NumMethod() == 0) {
 		return &True, nil
 	}
-	opts := &goTypeOptions{
-		defs: &typeRegistry{
-			types: make(map[reflect.Type]typeEntry),
-			nameFn: func(t reflect.Type) string {
-				return t.Name()
-			},
+	types := &typeRegistry{
+		types: make(map[reflect.Type]typeEntry),
+		nameFn: func(t reflect.Type) string {
+			return t.Name()
 		},
 	}
+	opts := &goTypeOptions{Types: types}
 	s, err := fromGoType(t, opts)
 	if err != nil {
 		return nil, fmt.Errorf("schema.FromGoType: %w", err)
 	}
 
-	if l := len(opts.defs.types); l != 0 {
+	if l := len(types.types); l != 0 {
 		s.Defs = make(map[string]Schema, l)
-		for _, v := range opts.defs.types {
+		for _, v := range types.types {
 			s.Defs[v.name] = *v.s
 		}
 	}
@@ -143,7 +150,7 @@ func isRefType(t reflect.Type) bool {
 }
 
 func fromGoType(t reflect.Type, opts *goTypeOptions) (*Schema, error) {
-	schema, defined, defs := &Schema{}, false, opts.defs
+	schema, defined, defs := &Schema{}, false, opts.Types
 
 	if _, found := defs.Load(t); found {
 		return defs.Ref(t), nil
