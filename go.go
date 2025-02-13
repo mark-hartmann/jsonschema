@@ -143,27 +143,59 @@ func (r *typeRegistry) Finalize(types []reflect.Type, schema *Schema) {
 		schema.Defs[e.name] = *e.s
 	}
 }
+
+// NewSimpleTypeRepository returns a reusable, in-memory implementation of TypeRepository
+// that is safe for concurrent use with FromGoType. Referenced schemas are added to the
+// $defs object of the generated Schema.
+func NewSimpleTypeRepository() TypeRepository {
+	return &typeRegistry{
+		types:  make(map[reflect.Type]typeEntry),
+		nameFn: func(t reflect.Type) string { return t.Name() },
+	}
+}
+
+// trackingTypeRepo is a specialized implementation of TypeRepository that wraps the
+// actual implementation and tracks the referenced Go types.
+type trackingTypeRepo struct {
+	TypeRepository
+	tracked map[reflect.Type]struct{}
+}
+
+func (r *trackingTypeRepo) Ref(t reflect.Type) *Schema {
+	var s *Schema
+	if s = r.TypeRepository.Ref(t); s != nil {
+		r.tracked[t] = struct{}{}
+	}
+	return s
+}
+
+func newTrackingRepo(repository TypeRepository) *trackingTypeRepo {
+	return &trackingTypeRepo{
+		TypeRepository: repository,
+		tracked:        make(map[reflect.Type]struct{}),
+	}
+}
+
 func FromGoType(t reflect.Type) (*Schema, error) {
 	if t == nil || (t.Kind() == reflect.Interface && t.NumMethod() == 0) {
 		return &True, nil
 	}
-	types := &typeRegistry{
-		types: make(map[reflect.Type]typeEntry),
-		nameFn: func(t reflect.Type) string {
-			return t.Name()
-		},
-	}
-	opts := &goTypeOptions{Types: types}
-	s, err := fromGoType(t, opts)
+
+	types := NewSimpleTypeRepository()
+	trackingRepo := newTrackingRepo(types)
+	s, err := fromGoType(t, &goTypeOptions{
+		Types: trackingRepo,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("schema.FromGoType: %w", err)
 	}
 
-	if l := len(types.types); l != 0 {
-		s.Defs = make(map[string]Schema, l)
-		for _, v := range types.types {
-			s.Defs[v.name] = *v.s
+	if v, ok := types.(localFinalizer); ok {
+		trackedTypes := make([]reflect.Type, 0, len(trackingRepo.tracked))
+		for t := range trackingRepo.tracked {
+			trackedTypes = append(trackedTypes, t)
 		}
+		v.Finalize(trackedTypes, s)
 	}
 	return s, nil
 }
