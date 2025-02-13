@@ -56,6 +56,15 @@ type TypeRepository interface {
 	Ref(t reflect.Type) *Schema
 }
 
+// localFinalizer allows implementations of the TypeRepository interface to edit the
+// schema after it has been completely generated - for example, to add schemas to the
+// $defs map.
+type localFinalizer interface {
+	// Finalize is called by FromGoType with all previously referenced types. The
+	// referenced types are tracked independently of the used type repository.
+	Finalize([]reflect.Type, *Schema)
+}
+
 type goTypeOptions struct {
 	Types TypeRepository
 
@@ -79,10 +88,18 @@ type typeRegistry struct {
 	nameFn func(t reflect.Type) string
 }
 
-func (r *typeRegistry) Load(t reflect.Type) (*Schema, bool) {
+func (r *typeRegistry) loadTypeEntry(t reflect.Type) (typeEntry, bool) {
 	r.Lock()
 	e, ok := r.types[t]
 	r.Unlock()
+	if !ok {
+		return typeEntry{}, false
+	}
+	return e, ok
+}
+
+func (r *typeRegistry) Load(t reflect.Type) (*Schema, bool) {
+	e, ok := r.loadTypeEntry(t)
 	if !ok {
 		return nil, false
 	}
@@ -110,6 +127,21 @@ func (r *typeRegistry) Ref(t reflect.Type) (rs *Schema) {
 	}
 	r.Unlock()
 	return
+}
+
+func (r *typeRegistry) Finalize(types []reflect.Type, schema *Schema) {
+	if len(types) == 0 {
+		return
+	}
+	if schema.Defs == nil {
+		schema.Defs = make(map[string]Schema)
+	}
+
+	schema.Defs = make(map[string]Schema)
+	for i := range types {
+		e, _ := r.loadTypeEntry(types[i])
+		schema.Defs[e.name] = *e.s
+	}
 }
 func FromGoType(t reflect.Type) (*Schema, error) {
 	if t == nil || (t.Kind() == reflect.Interface && t.NumMethod() == 0) {
