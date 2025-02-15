@@ -65,7 +65,7 @@ type localFinalizer interface {
 	Finalize([]reflect.Type, *Schema)
 }
 
-type goTypeOptions struct {
+type GoTypeConfig struct {
 	Types TypeRepository
 
 	// RefTypesNotNullable controls whether Go reference types are implicitly nullable
@@ -154,6 +154,16 @@ func NewSimpleTypeRepository() TypeRepository {
 	}
 }
 
+// pkgToCamel converts a go package name and path to a camelCase string
+func pkgToCamel(s string) string {
+	parts := strings.Split(strings.Replace(s, "_", "/", -1), "/")
+	cc := strings.ToLower(parts[0])
+	for _, word := range parts[1:] {
+		cc += string(unicode.ToUpper(rune(word[0]))) + strings.ToLower(word[1:])
+	}
+	return cc
+}
+
 // trackingTypeRepo is a specialized implementation of TypeRepository that wraps the
 // actual implementation and tracks the referenced Go types.
 type trackingTypeRepo struct {
@@ -176,16 +186,18 @@ func newTrackingRepo(repository TypeRepository) *trackingTypeRepo {
 	}
 }
 
-func FromGoType(t reflect.Type) (*Schema, error) {
+func FromGoType(t reflect.Type, opts GoTypeConfig) (*Schema, error) {
 	if t == nil || (t.Kind() == reflect.Interface && t.NumMethod() == 0) {
 		return &True, nil
 	}
 
-	types := NewSimpleTypeRepository()
-	trackingRepo := newTrackingRepo(types)
-	s, err := fromGoType(t, &goTypeOptions{
-		Types: trackingRepo,
-	})
+	if opts.Types == nil {
+		opts.Types = NewSimpleTypeRepository()
+	}
+	types, trackingRepo := opts.Types, newTrackingRepo(opts.Types)
+	opts.Types = trackingRepo
+
+	s, err := fromGoType(t, opts)
 	if err != nil {
 		return nil, fmt.Errorf("schema.FromGoType: %w", err)
 	}
@@ -213,7 +225,7 @@ func isRefType(t reflect.Type) bool {
 	return t.Kind() == reflect.Map || t.Kind() == reflect.Array || t.Kind() == reflect.Slice
 }
 
-func fromGoType(t reflect.Type, opts *goTypeOptions) (*Schema, error) {
+func fromGoType(t reflect.Type, opts GoTypeConfig) (*Schema, error) {
 	schema, defined, defs := &Schema{}, false, opts.Types
 
 	if _, found := defs.Load(t); found {
@@ -498,7 +510,7 @@ func patternSchema(regexp *regexp.Regexp) *Schema {
 	}
 }
 
-func structType(t reflect.Type, opts *goTypeOptions) (*Schema, error) {
+func structType(t reflect.Type, opts GoTypeConfig) (*Schema, error) {
 	s := &Schema{Type: TypeSet{TypeObject}}
 	s.AdditionalProperties = &False
 
@@ -598,7 +610,7 @@ func buildDependentRequired(required, options []string) map[string][]string {
 	return result
 }
 
-func arrType(t reflect.Type, opts *goTypeOptions) (*Schema, error) {
+func arrType(t reflect.Type, opts GoTypeConfig) (*Schema, error) {
 	s := newTyped(TypeArray, !opts.RefTypesNotNullable)
 	if t.Kind() == reflect.Array {
 		s.MaxItems = ptr(t.Len())
@@ -611,7 +623,7 @@ func arrType(t reflect.Type, opts *goTypeOptions) (*Schema, error) {
 	return s, nil
 }
 
-func mapType(t reflect.Type, opts *goTypeOptions) (*Schema, error) {
+func mapType(t reflect.Type, opts GoTypeConfig) (*Schema, error) {
 	keyType, valType := t.Key(), t.Elem()
 	if keyType.Kind() == reflect.String {
 		s := newTyped(TypeObject, !opts.RefTypesNotNullable)

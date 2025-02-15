@@ -60,7 +60,7 @@ func TestFromGoType_Primitives(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		s, e := FromGoType(reflect.TypeOf(test.In))
+		s, e := FromGoType(reflect.TypeOf(test.In), GoTypeConfig{})
 		if e != nil {
 			t.Errorf("unexpected error: %e", e)
 			continue
@@ -313,7 +313,7 @@ func TestFromGoType_Embedded(t *testing.T) {
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			s, e := FromGoType(reflect.TypeOf(test.In))
+			s, e := FromGoType(reflect.TypeOf(test.In), GoTypeConfig{})
 
 			if e != nil {
 				t.Errorf("unexpected error: %s", e)
@@ -613,7 +613,7 @@ func TestFromGoType_Struct(t *testing.T) {
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			s, e := FromGoType(reflect.TypeOf(test.In))
+			s, e := FromGoType(reflect.TypeOf(test.In), GoTypeConfig{})
 			if e != nil {
 				t.Errorf("unexpected error: %s", e)
 				return
@@ -829,7 +829,7 @@ func TestFromGoType(t *testing.T) {
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			s, e := FromGoType(reflect.TypeOf(test.In))
+			s, e := FromGoType(reflect.TypeOf(test.In), GoTypeConfig{})
 			if e != nil && test.Err == nil {
 				t.Errorf("unexpected error: %s", e)
 				return
