@@ -526,9 +526,20 @@ func structType(t reflect.Type, opts GoTypeConfig) (*Schema, error) {
 			err error
 		)
 		if x.quoted {
+			var nullable = false
+			if x.typ.Kind() == reflect.Ptr {
+				nullable = true
+				for x.typ.Kind() == reflect.Ptr {
+					x.typ = x.typ.Elem()
+				}
+			}
+
 			switch x.typ.Kind() {
 			case reflect.Bool:
 				fs = &Schema{Enum: []any{"true", "false"}}
+				if nullable {
+					fs = &Schema{OneOf: []Schema{*fs, {Type: []Type{TypeNull}}}}
+				}
 			case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 				fs = patternSchema(patternSignedInt)
 			case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
@@ -536,6 +547,11 @@ func structType(t reflect.Type, opts GoTypeConfig) (*Schema, error) {
 			case reflect.Float32, reflect.Float64:
 				fs = patternSchema(patternFractional)
 			default:
+			}
+
+			// add null type if the schema has a type(set)
+			if fs != nil && len(fs.Type) > 0 && nullable && !slices.Contains(fs.Type, TypeNull) {
+				fs.Type = append(fs.Type, TypeNull)
 			}
 		} else {
 			fs, err = fromGoType(x.typ, opts)

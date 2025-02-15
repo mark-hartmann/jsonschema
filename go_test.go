@@ -577,11 +577,12 @@ func TestFromGoType_Struct(t *testing.T) {
 		},
 		"quoted": {
 			In: struct {
-				A bool    `json:",string"`
-				B boolean `json:",string"`
-				C uint16  `json:",string"`
-				D int8    `json:",string"`
-				E float32 `json:",string"`
+				A bool     `json:",string"`
+				B boolean  `json:",string"`
+				C uint16   `json:",string"`
+				D int8     `json:",string"`
+				E *float32 `json:",string"`
+				F *bool    `json:",string"`
 			}{},
 			Out: &Schema{
 				Type: TypeSet{TypeObject},
@@ -601,12 +602,18 @@ func TestFromGoType_Struct(t *testing.T) {
 						Pattern: ptr(`^-?(0|[1-9]\d*)$`),
 					},
 					"E": {
-						Type:    TypeSet{TypeString},
+						Type:    TypeSet{TypeString, TypeNull},
 						Pattern: ptr(`^-?(0|[1-9]\d*)(\.\d+)?$`),
+					},
+					"F": {
+						OneOf: []Schema{
+							{Enum: []any{"true", "false"}},
+							{Type: TypeSet{TypeNull}},
+						},
 					},
 				},
 				AdditionalProperties: &False,
-				Required:             []string{"A", "B", "C", "D", "E"},
+				Required:             []string{"A", "B", "C", "D", "E", "F"},
 			},
 		},
 	}
