@@ -52,7 +52,7 @@ var m = map[reflect.Kind]Schema{
 // saving of new schemas as well as the loading and referencing of known schemas.
 type TypeRepository interface {
 	Load(t reflect.Type) (*Schema, bool)
-	Store(t reflect.Type, schema *Schema) bool
+	Store(t reflect.Type, schema *Schema, inline bool) bool
 	Ref(t reflect.Type) *Schema
 }
 
@@ -79,7 +79,8 @@ type typeEntry struct {
 	t reflect.Type
 	s *Schema
 
-	name string
+	name   string
+	inline bool
 }
 
 type typeRegistry struct {
@@ -106,14 +107,15 @@ func (r *typeRegistry) Load(t reflect.Type) (*Schema, bool) {
 	return e.s, ok
 }
 
-func (r *typeRegistry) Store(t reflect.Type, schema *Schema) bool {
+func (r *typeRegistry) Store(t reflect.Type, schema *Schema, inline bool) bool {
 	r.Lock()
 	_, ok := r.types[t]
 	if !ok {
 		r.types[t] = typeEntry{
-			s:    schema,
-			t:    t,
-			name: r.nameFn(t),
+			s:      schema,
+			t:      t,
+			name:   r.nameFn(t),
+			inline: inline,
 		}
 	}
 	r.Unlock()
@@ -123,7 +125,11 @@ func (r *typeRegistry) Store(t reflect.Type, schema *Schema) bool {
 func (r *typeRegistry) Ref(t reflect.Type) (rs *Schema) {
 	r.Lock()
 	if e, ok := r.types[t]; ok {
-		rs = &Schema{Ref: "#/$defs/" + e.name}
+		if e.inline {
+			rs = e.s
+		} else {
+			rs = &Schema{Ref: "#/$defs/" + e.name}
+		}
 	}
 	r.Unlock()
 	return
@@ -140,6 +146,9 @@ func (r *typeRegistry) Finalize(types []reflect.Type, schema *Schema) {
 	schema.Defs = make(map[string]Schema)
 	for i := range types {
 		e, _ := r.loadTypeEntry(types[i])
+		if e.inline {
+			continue
+		}
 		schema.Defs[e.name] = *e.s
 	}
 }
@@ -235,7 +244,7 @@ func fromGoType(t reflect.Type, opts GoTypeConfig) (*Schema, error) {
 		// the line if necessary. If further calls to fromGoType encounter a defined
 		// type that has already been marked as known, a referring schema can be
 		// returned.
-		defs.Store(t, schema)
+		defs.Store(t, schema, false)
 		defined = true
 	}
 
