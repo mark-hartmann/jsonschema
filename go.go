@@ -257,12 +257,10 @@ func fromGoType(t reflect.Type, opts GoTypeConfig) (*Schema, error) {
 
 		*schema = *underlying
 		if nullable {
-			if underlying.Ref != "" {
+			if len(schema.Type) > 0 && !slices.Contains(underlying.Type, TypeNull) {
+				schema.Type = append(schema.Type, TypeNull)
+			} else if underlying.Ref != "" || underlying.Const != nil || underlying.Enum != nil {
 				*schema = Schema{OneOf: []Schema{*underlying, {Type: TypeSet{TypeNull}}}}
-			} else {
-				if !slices.Contains(schema.Type, TypeNull) {
-					schema.Type = append(schema.Type, TypeNull)
-				}
 			}
 		}
 
