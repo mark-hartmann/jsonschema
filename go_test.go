@@ -57,6 +57,19 @@ func TestFromGoType_Primitives(t *testing.T) {
 				},
 			},
 		},
+		{
+			In: ptr(StrManyPtr(ptr(ptr(ptr(""))))), Out: &Schema{
+				OneOf: []Schema{
+					{Ref: "#/$defs/StrManyPtr"},
+					{Type: TypeSet{TypeNull}},
+				},
+				Defs: map[string]Schema{
+					"StrManyPtr": {
+						Type: TypeSet{TypeString, TypeNull},
+					},
+				},
+			},
+		},
 	}
 
 	for _, test := range tests {
@@ -588,10 +601,10 @@ func TestFromGoType_Struct(t *testing.T) {
 				Type: TypeSet{TypeObject},
 				Properties: map[string]Schema{
 					"A": {
-						Enum: []any{"true", "false"},
+						Enum: []any{"false", "true"},
 					},
 					"B": {
-						Enum: []any{"true", "false"},
+						Ref: "#/$defs/boolean",
 					},
 					"C": {
 						Type:    TypeSet{TypeString},
@@ -607,13 +620,18 @@ func TestFromGoType_Struct(t *testing.T) {
 					},
 					"F": {
 						OneOf: []Schema{
-							{Enum: []any{"true", "false"}},
+							{Enum: []any{"false", "true"}},
 							{Type: TypeSet{TypeNull}},
 						},
 					},
 				},
 				AdditionalProperties: &False,
 				Required:             []string{"A", "B", "C", "D", "E", "F"},
+				Defs: map[string]Schema{
+					"boolean": {
+						Type: TypeSet{TypeBoolean},
+					},
+				},
 			},
 		},
 	}
@@ -757,7 +775,10 @@ func TestFromGoType(t *testing.T) {
 		"pointer to defined string map": {
 			In: &MapType{},
 			Out: &Schema{
-				Ref: "#/$defs/MapType",
+				OneOf: []Schema{
+					{Ref: "#/$defs/MapType"},
+					{Type: TypeSet{TypeNull}},
+				},
 				Defs: map[string]Schema{
 					"MapType": {
 						Type:                 TypeSet{TypeObject, TypeNull},
@@ -853,5 +874,94 @@ func TestFromGoType(t *testing.T) {
 				t.Errorf("\nhave %s\nneed %s", s, test.Out)
 			}
 		})
+	}
+}
+
+func TestNewSimpleTypeRepository(t *testing.T) {
+	types := NewSimpleTypeRepository()
+	types.Store(reflect.TypeFor[bool](), &Schema{Enum: []any{0, 1}}, true)
+	types.Store(reflect.TypeFor[*bool](), &Schema{Enum: []any{0, 1, nil}}, true)
+
+	type BooleanPtr *bool
+	types.Store(reflect.TypeFor[BooleanPtr](), &Schema{Enum: []any{"no", "yes", "none"}}, true)
+
+	types.Store(QuotedTypeOf(reflect.TypeFor[uint8]()), &Schema{Enum: []any{"0", "1", "2"}}, true)
+	types.Store(QuotedTypeOf(reflect.TypeFor[*uint8]()), &Schema{Enum: []any{"2", "1", "0"}}, true)
+
+	s, err := FromGoType(reflect.TypeFor[struct {
+		A bool            `json:",omitempty"`
+		B *bool           `json:",omitempty"`
+		C **bool          `json:",omitempty"`
+		D BooleanPtr      `json:",omitempty"`
+		E *BooleanPtr     `json:",omitempty"`
+		F []bool          `json:",omitempty"`
+		G map[string]bool `json:",omitempty"`
+		H uint8           `json:",omitempty"`
+		I *uint8          `json:",omitempty"`
+		J uint8           `json:",omitempty,string"`
+		K *uint8          `json:",omitempty,string"`
+	}](), GoTypeConfig{Types: types})
+
+	if err != nil {
+		t.Errorf("unexpected error: %s", err)
+	}
+
+	expected := &Schema{
+		Type: TypeSet{TypeObject},
+		Properties: map[string]Schema{
+			"A": {Enum: []any{0, 1}},
+			"B": {
+				OneOf: []Schema{
+					{Enum: []any{0, 1}},
+					{Type: TypeSet{TypeNull}},
+				},
+			},
+			"C": {
+				OneOf: []Schema{
+					{Enum: []any{0, 1}},
+					{Type: TypeSet{TypeNull}},
+				},
+			},
+			"D": {Enum: []any{"no", "yes", "none"}},
+			"E": {
+				OneOf: []Schema{
+					{Enum: []any{"no", "yes", "none"}},
+					{Type: TypeSet{TypeNull}},
+				},
+			},
+			"F": {
+				Type: TypeSet{TypeArray, TypeNull},
+				Items: &Schema{
+					Enum: []any{0, 1},
+				},
+			},
+			"G": {
+				Type: TypeSet{TypeObject, TypeNull},
+				AdditionalProperties: &Schema{
+					Enum: []any{0, 1},
+				},
+			},
+			"H": {
+				Type:    TypeSet{TypeInteger},
+				Minimum: ptr(json.Number("0")),
+				Maximum: ptr(json.Number("255")),
+			},
+			"I": {
+				Type:    TypeSet{TypeInteger, TypeNull},
+				Minimum: ptr(json.Number("0")),
+				Maximum: ptr(json.Number("255")),
+			},
+			"J": {Enum: []any{"0", "1", "2"}},
+			"K": {
+				OneOf: []Schema{
+					{Enum: []any{"0", "1", "2"}},
+					{Type: TypeSet{TypeNull}},
+				},
+			},
+		},
+		AdditionalProperties: &False,
+	}
+	if !reflect.DeepEqual(s, expected) {
+		t.Errorf("\nhave %s\nneed %s", s, expected)
 	}
 }

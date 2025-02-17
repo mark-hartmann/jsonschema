@@ -85,6 +85,24 @@ type typeEntry struct {
 	inline bool
 }
 
+var qt sync.Map
+
+// QuotedTypeOf returns a quotable type. Quoted types can be used to override the default
+// schema used for quotable types and currently includes bool, floats, int/uint and
+// strings.
+func QuotedTypeOf(t reflect.Type) reflect.Type {
+	actual, _ := qt.LoadOrStore(t, &quotedType{Type: t})
+	return actual.(*quotedType)
+}
+
+type quotedType struct {
+	reflect.Type
+}
+
+func (t *quotedType) Elem() reflect.Type {
+	return QuotedTypeOf(t.Type.Elem())
+}
+
 type typeRegistry struct {
 	sync.Mutex
 	types  map[reflect.Type]typeEntry
@@ -110,15 +128,16 @@ func (r *typeRegistry) Load(t reflect.Type) (*Schema, bool) {
 }
 
 func (r *typeRegistry) Store(t reflect.Type, schema *Schema, inline bool) bool {
+	if t.Name() == "" {
+		return false
+	}
 	r.Lock()
 	_, ok := r.types[t]
-	if !ok {
-		r.types[t] = typeEntry{
-			s:      schema,
-			t:      t,
-			name:   r.nameFn(t),
-			inline: inline,
-		}
+	r.types[t] = typeEntry{
+		s:      schema,
+		t:      t,
+		name:   r.nameFn(t),
+		inline: inline,
 	}
 	r.Unlock()
 	return !ok
@@ -141,17 +160,20 @@ func (r *typeRegistry) Finalize(types []reflect.Type, schema *Schema) {
 	if len(types) == 0 {
 		return
 	}
-	if schema.Defs == nil {
-		schema.Defs = make(map[string]Schema)
-	}
-
-	schema.Defs = make(map[string]Schema)
+	defs := make(map[string]Schema)
 	for i := range types {
 		e, _ := r.loadTypeEntry(types[i])
 		if e.inline {
 			continue
 		}
-		schema.Defs[e.name] = *e.s
+		defs[e.name] = *e.s
+	}
+
+	if len(defs) > 0 && schema.Defs == nil {
+		schema.Defs = make(map[string]Schema)
+	}
+	for n, s := range defs {
+		schema.Defs[n] = s
 	}
 }
 
@@ -159,10 +181,31 @@ func (r *typeRegistry) Finalize(types []reflect.Type, schema *Schema) {
 // that is safe for concurrent use with FromGoType. Referenced schemas are added to the
 // $defs object of the generated Schema.
 func NewSimpleTypeRepository() TypeRepository {
-	return &typeRegistry{
+	repo := &typeRegistry{
 		types:  make(map[reflect.Type]typeEntry),
 		nameFn: func(t reflect.Type) string { return t.Name() },
 	}
+
+	repo.Store(QuotedTypeOf(reflect.TypeFor[bool]()), &Schema{Enum: []any{"false", "true"}}, true)
+	intSchema := patternSchema(patternSignedInt)
+	repo.Store(QuotedTypeOf(reflect.TypeFor[int]()), intSchema, true)
+	repo.Store(QuotedTypeOf(reflect.TypeFor[int8]()), intSchema, true)
+	repo.Store(QuotedTypeOf(reflect.TypeFor[int16]()), intSchema, true)
+	repo.Store(QuotedTypeOf(reflect.TypeFor[int32]()), intSchema, true)
+	repo.Store(QuotedTypeOf(reflect.TypeFor[int64]()), intSchema, true)
+
+	uintSchema := patternSchema(patternUnsignedInt)
+	repo.Store(QuotedTypeOf(reflect.TypeFor[uint]()), uintSchema, true)
+	repo.Store(QuotedTypeOf(reflect.TypeFor[uint8]()), uintSchema, true)
+	repo.Store(QuotedTypeOf(reflect.TypeFor[uint16]()), uintSchema, true)
+	repo.Store(QuotedTypeOf(reflect.TypeFor[uint32]()), uintSchema, true)
+	repo.Store(QuotedTypeOf(reflect.TypeFor[uint64]()), uintSchema, true)
+
+	floatSchema := patternSchema(patternFractional)
+	repo.Store(QuotedTypeOf(reflect.TypeFor[float32]()), floatSchema, true)
+	repo.Store(QuotedTypeOf(reflect.TypeFor[float64]()), floatSchema, true)
+
+	return repo
 }
 
 // pkgToCamel converts a go package name and path to a camelCase string
@@ -236,49 +279,32 @@ func isRefType(t reflect.Type) bool {
 	return t.Kind() == reflect.Map || t.Kind() == reflect.Array || t.Kind() == reflect.Slice
 }
 
+type untyped struct {
+	reflect.Type
+}
+
+func (u *untyped) Name() string {
+	return ""
+}
+
+func isDefinedType(t reflect.Type) bool {
+	return t.PkgPath() != "" && t.Name() != ""
+}
+
 func fromGoType(t reflect.Type, opts GoTypeConfig) (*Schema, error) {
-	schema, defined, defs := &Schema{}, false, opts.Types
+	schema, inProgress, defs := &Schema{}, false, opts.Types
 
-	if _, found := defs.Load(t); found {
-		return defs.Ref(t), nil
-	} else if t.PkgPath() != "" && t.Name() != "" {
-		// It's a defined type, we can store the empty schema and reference it down
-		// the line if necessary. If further calls to fromGoType encounter a defined
-		// type that has already been marked as known, a referring schema can be
-		// returned.
-		defs.Store(t, schema, false)
-		defined = true
+	// Unwrap pointer types until the next element is a named or defined type. This
+	// is done to reduce pointer-to-pointer types to a simple pointer type.
+	nullable := false
+	for t.Kind() == reflect.Ptr && t.Name() == "" {
+		nullable = true
+		t = t.Elem()
 	}
 
-	if t.Kind() == reflect.Ptr {
-		nullable := !isRefType(t.Elem())
-		underlying, err := fromGoType(t.Elem(), opts)
-		if err != nil {
-			return nil, err
-		}
-
-		*schema = *underlying
-		if nullable {
-			if len(schema.Type) > 0 && !slices.Contains(underlying.Type, TypeNull) {
-				schema.Type = append(schema.Type, TypeNull)
-			} else if underlying.Ref != "" || underlying.Const != nil || underlying.Enum != nil {
-				*schema = Schema{OneOf: []Schema{*underlying, {Type: TypeSet{TypeNull}}}}
-			}
-		}
-
-		if !defined {
-			return schema, nil
-		}
-		return defs.Ref(t), nil
-	}
-
-	// if primitive, we can return early because they are predefined.
-	if s, ok := m[t.Kind()]; ok {
-		*schema = s
-		if defined {
-			return defs.Ref(t), nil
-		}
-		return schema, nil
+	// Reference types are implicitly nullable
+	if nullable && isRefType(t) {
+		nullable = isDefinedType(t) || opts.RefTypesNotNullable
 	}
 
 	var (
@@ -286,31 +312,72 @@ func fromGoType(t reflect.Type, opts GoTypeConfig) (*Schema, error) {
 		err error
 	)
 
-	switch t.Kind() {
-	case reflect.Array, reflect.Slice:
-		s, err = arrType(t, opts)
-	case reflect.Struct:
-		s, err = structType(t, opts)
-	case reflect.Map:
-		s, err = mapType(t, opts)
-	case reflect.Interface:
-		if t.NumMethod() == 0 {
-			return &True, nil
+	// Load non-ptr type
+	found := false
+	if _, found = defs.Load(t); found {
+		s, err = defs.Ref(t), nil
+	} else if isDefinedType(t) {
+		// It's a defined type, we can store the empty schema and reference it down
+		// the line if necessary. If further calls to fromGoType encounter a defined
+		// type that has already been marked as known, a referring schema can be
+		// returned.
+		defs.Store(t, schema, false)
+		t = &untyped{Type: t}
+		// A defined type is currently being created, calling Load or Def will return a
+		// reference schema! This is required for self referencing types such as a linked
+		// list.
+		inProgress = true
+	}
+
+	if !found {
+		if inProgress {
+			s, err = fromGoType(&untyped{Type: t}, opts)
+		} else if predefined, ok := m[t.Kind()]; ok {
+			s = &predefined
+		} else {
+			switch t.Kind() {
+			case reflect.Array, reflect.Slice:
+				s, err = arrType(t, opts)
+			case reflect.Struct:
+				s, err = structType(t, opts)
+			case reflect.Map:
+				s, err = mapType(t, opts)
+			case reflect.Interface:
+				if t.NumMethod() == 0 {
+					s, err = &True, nil
+					break
+				}
+				fallthrough
+			default:
+				return nil, fmt.Errorf("cannot map Go type %s", t)
+			}
 		}
-		fallthrough
-	default:
-		return nil, fmt.Errorf("cannot map Go type %s", t)
 	}
 
 	if err != nil {
 		return nil, err
 	}
-	*schema = *s
-	if defined {
-		return defs.Ref(t), nil
-	}
-	return s, nil
 
+	if inProgress {
+		*schema = *s
+		if ut, ok := t.(*untyped); ok {
+			t = ut.Type
+		}
+		r := defs.Ref(t)
+		s = r
+	}
+
+	// Reference types are implicitly nullable, so we skip this step unless it's a defined
+	// type such as A([]string),
+	if nullable {
+		if len(s.Type) > 0 && !slices.Contains(s.Type, TypeNull) {
+			s.Type = append(s.Type, TypeNull)
+		} else {
+			s = &Schema{OneOf: []Schema{*s, {Type: TypeSet{TypeNull}}}}
+		}
+	}
+
+	return s, nil
 }
 
 type field struct {
@@ -409,7 +476,7 @@ func typeFields(t reflect.Type) []field {
 					}
 				}
 
-				if sf.Type.Kind() == reflect.Ptr {
+				if sf.Type.Kind() == reflect.Ptr && sf.Type.Name() == "" {
 					sft = reflect.PointerTo(sft)
 				}
 
@@ -534,37 +601,29 @@ func structType(t reflect.Type, opts GoTypeConfig) (*Schema, error) {
 			fs  *Schema
 			err error
 		)
+
+		xt := x.typ
 		if x.quoted {
 			var nullable = false
-			if x.typ.Kind() == reflect.Ptr {
+			t2 := xt
+			if t2.Kind() == reflect.Ptr && t2.Name() == "" {
 				nullable = true
-				for x.typ.Kind() == reflect.Ptr {
-					x.typ = x.typ.Elem()
+				for t2.Kind() == reflect.Ptr && t2.Name() == "" {
+					t2 = t2.Elem()
 				}
 			}
 
-			switch x.typ.Kind() {
-			case reflect.Bool:
-				fs = &Schema{Enum: []any{"true", "false"}}
+			// qt is not a TypeRepository, but a sync.Map that stores all quotedType. If the type
+			// is found, we replace the lookup type.
+			if q, loaded := qt.Load(t2); loaded {
 				if nullable {
-					fs = &Schema{OneOf: []Schema{*fs, {Type: []Type{TypeNull}}}}
+					xt = QuotedTypeOf(reflect.PointerTo(t2))
+				} else {
+					xt = q.(*quotedType)
 				}
-			case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-				fs = patternSchema(patternSignedInt)
-			case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-				fs = patternSchema(patternUnsignedInt)
-			case reflect.Float32, reflect.Float64:
-				fs = patternSchema(patternFractional)
-			default:
 			}
-
-			// add null type if the schema has a type(set)
-			if fs != nil && len(fs.Type) > 0 && nullable && !slices.Contains(fs.Type, TypeNull) {
-				fs.Type = append(fs.Type, TypeNull)
-			}
-		} else {
-			fs, err = fromGoType(x.typ, opts)
 		}
+		fs, err = fromGoType(xt, opts)
 		if err != nil {
 			return nil, fmt.Errorf("field %q: %w", x.name, err)
 		}
