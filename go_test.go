@@ -23,6 +23,7 @@ func TestFromGoType_Primitives(t *testing.T) {
 
 	type IntType int
 	type StrManyPtr ***string
+	type ExtremeExample **[8]***map[ExtremeExample]StrManyPtr
 
 	tests := []struct {
 		In  any
@@ -66,6 +67,43 @@ func TestFromGoType_Primitives(t *testing.T) {
 				Defs: map[string]Schema{
 					"StrManyPtr": {
 						Type: TypeSet{TypeString, TypeNull},
+					},
+				},
+			},
+		},
+		{
+			// quite extreme example with mixed, self referencing type and chained pointers
+			In: ptr(ExtremeExample(ptr(&[8]***map[ExtremeExample]StrManyPtr{}))),
+			Out: &Schema{
+				OneOf: []Schema{
+					{Ref: "#/$defs/ExtremeExample"},
+					{Type: TypeSet{TypeNull}},
+				},
+				Defs: map[string]Schema{
+					"StrManyPtr": {
+						Type: TypeSet{TypeString, TypeNull},
+					},
+					"ExtremeExample": {
+						Type: TypeSet{TypeArray, TypeNull},
+						Items: &Schema{
+							Type: TypeSet{TypeObject, TypeNull},
+							Properties: map[string]Schema{
+								"keys": {
+									Type: TypeSet{TypeArray},
+									Items: &Schema{
+										Ref: "#/$defs/ExtremeExample",
+									},
+									UniqueItems: ptr(true),
+								},
+								"values": {
+									Type:  TypeSet{TypeArray},
+									Items: &Schema{Ref: "#/$defs/StrManyPtr"},
+								},
+							},
+							AdditionalProperties: &False,
+							Required:             []string{"keys", "values"},
+						},
+						MaxItems: ptr(8),
 					},
 				},
 			},
