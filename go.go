@@ -75,6 +75,10 @@ type GoTypeConfig struct {
 	// is generated, otherwise it is just TypeArray or TypeObject. This option has no
 	// effect on pointers to reference types.
 	RefTypesNotNullable bool
+	// NullableEnumInjectNull controls whether a nullable enum should be constructed by
+	// adding a null-value or by wrapping the enum in a oneOf schema. Does not affect
+	// defined types mapped by [TypeRepository.Store] unless inlined.
+	NullableEnumInjectNull bool
 }
 
 type typeEntry struct {
@@ -316,6 +320,8 @@ func fromGoType(t reflect.Type, opts GoTypeConfig) (*Schema, error) {
 	found := false
 	if _, found = defs.Load(t); found {
 		s, err = defs.Ref(t), nil
+		// todo: Works for now, but there should be more sophisticated handling of options.
+		nullable = nullable || (t.Kind() == reflect.Ptr && len(s.Enum) > 0 && opts.NullableEnumInjectNull)
 	} else if isDefinedType(t) {
 		// It's a defined type, we can store the empty schema and reference it down
 		// the line if necessary. If further calls to fromGoType encounter a defined
@@ -372,6 +378,8 @@ func fromGoType(t reflect.Type, opts GoTypeConfig) (*Schema, error) {
 	if nullable {
 		if len(s.Type) > 0 && !slices.Contains(s.Type, TypeNull) {
 			s.Type = append(s.Type, TypeNull)
+		} else if len(s.Enum) > 0 && opts.NullableEnumInjectNull && !slices.Contains(s.Enum, nil) {
+			s.Enum = append(s.Enum, nil)
 		} else {
 			s = &Schema{OneOf: []Schema{*s, {Type: TypeSet{TypeNull}}}}
 		}

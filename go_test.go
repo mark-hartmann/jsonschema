@@ -915,6 +915,108 @@ func TestFromGoType(t *testing.T) {
 	}
 }
 
+func TestFromGoType_GoTypeConfig(t *testing.T) {
+	type boolType *bool
+	type inlineBoolType *bool
+
+	types := NewSimpleTypeRepository()
+	types.Store(reflect.TypeFor[bool](), &Schema{Enum: []any{0, 1}}, true)
+	types.Store(reflect.TypeFor[boolType](), &Schema{Enum: []any{0, 1}}, false)
+	types.Store(reflect.TypeFor[inlineBoolType](), &Schema{Enum: []any{0, 1}}, true)
+
+	tests := map[string]struct {
+		In   any
+		Conf GoTypeConfig
+		Out  *Schema
+		Err  error
+	}{
+		"RefTypesNotNullable=true": {
+			In: struct {
+				A []string
+				// B is a pointer, this makes it always nullable
+				B *[]string
+			}{},
+			Conf: GoTypeConfig{RefTypesNotNullable: true},
+			Out: &Schema{
+				Type: TypeSet{TypeObject},
+				Properties: map[string]Schema{
+					"A": {
+						Type: TypeSet{TypeArray},
+						Items: &Schema{
+							Type: TypeSet{TypeString},
+						},
+					},
+					"B": {
+						Type: TypeSet{TypeArray, TypeNull},
+						Items: &Schema{
+							Type: TypeSet{TypeString},
+						},
+					},
+				},
+				AdditionalProperties: &False,
+				Required:             []string{"A", "B"},
+			},
+		},
+		"NullableEnumInjectNull=true": {
+			In: struct {
+				A bool
+				B *bool
+				C boolType
+				D *inlineBoolType
+			}{},
+			Conf: GoTypeConfig{
+				Types:                  types,
+				NullableEnumInjectNull: true,
+			},
+			Out: &Schema{
+				Type: TypeSet{TypeObject},
+				Properties: map[string]Schema{
+					"A": {
+						Enum: []any{0, 1},
+					},
+					"B": {
+						Enum: []any{0, 1, nil},
+					},
+					"C": {
+						Ref: "#/$defs/boolType",
+					},
+					"D": {
+						Enum: []any{0, 1, nil},
+					},
+				},
+				AdditionalProperties: &False,
+				Required:             []string{"A", "B", "C", "D"},
+				Defs: map[string]Schema{
+					"boolType": {
+						Enum: []any{0, 1},
+					},
+				},
+			},
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			s, e := FromGoType(reflect.TypeOf(test.In), test.Conf)
+			if e != nil && test.Err == nil {
+				t.Errorf("unexpected error: %s", e)
+				return
+			}
+
+			if test.Err != nil && e == nil {
+				t.Errorf("expected error, got nil")
+				return
+			}
+
+			if test.Err != nil && e.Error() != test.Err.Error() {
+				t.Errorf("\nhave %s\nneed %s", e, test.Err)
+			} else if !reflect.DeepEqual(s, test.Out) {
+				t.Errorf("\nhave %s\nneed %s", s, test.Out)
+			}
+		})
+	}
+}
+
 func TestNewSimpleTypeRepository(t *testing.T) {
 	types := NewSimpleTypeRepository()
 	types.Store(reflect.TypeFor[bool](), &Schema{Enum: []any{0, 1}}, true)
