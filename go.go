@@ -53,9 +53,16 @@ var m = map[reflect.Kind]Schema{
 // TypeRepository manages known schema definitions for Go types and allow the
 // saving of new schemas as well as the loading and referencing of known schemas.
 type TypeRepository interface {
+	// Load retrieves the [Schema] mapped to the Go type. If the type is not
+	// known to the repository, false is returned.
 	Load(t reflect.Type) (*Schema, bool)
+	// Store allows to define a schema for a data type. If inline is true, the
+	// schema is treated as a inline schema each time it is used and is not
+	// included in the defined schemas.
 	Store(t reflect.Type, schema *Schema, inline bool) bool
-	Ref(t reflect.Type) *Schema
+	// Ref returns a reference to a stored schema or the schema itself it
+	// was stored inline.
+	Ref(t reflect.Type) (*Schema, bool)
 }
 
 // localFinalizer allows implementations of the TypeRepository interface to edit the
@@ -147,14 +154,15 @@ func (r *typeRegistry) Store(t reflect.Type, schema *Schema, inline bool) bool {
 	return !ok
 }
 
-func (r *typeRegistry) Ref(t reflect.Type) (rs *Schema) {
+func (r *typeRegistry) Ref(t reflect.Type) (rs *Schema, ok bool) {
 	r.Lock()
-	if e, ok := r.types[t]; ok {
+	if e, found := r.types[t]; found {
 		if e.inline {
 			rs = e.s
 		} else {
 			rs = &Schema{Ref: "#/$defs/" + e.name}
 		}
+		ok = true
 	}
 	r.Unlock()
 	return
@@ -229,12 +237,13 @@ type trackingTypeRepo struct {
 	tracked map[reflect.Type]struct{}
 }
 
-func (r *trackingTypeRepo) Ref(t reflect.Type) *Schema {
+func (r *trackingTypeRepo) Ref(t reflect.Type) (*Schema, bool) {
 	var s *Schema
-	if s = r.TypeRepository.Ref(t); s != nil {
+	var ok bool
+	if s, ok = r.TypeRepository.Ref(t); ok {
 		r.tracked[t] = struct{}{}
 	}
-	return s
+	return s, ok
 }
 
 func newTrackingRepo(repository TypeRepository) *trackingTypeRepo {
@@ -319,7 +328,7 @@ func fromGoType(t reflect.Type, opts GoTypeConfig) (*Schema, error) {
 	// Load non-ptr type
 	found := false
 	if _, found = defs.Load(t); found {
-		s, err = defs.Ref(t), nil
+		s, _ = defs.Ref(t)
 		// todo: Works for now, but there should be more sophisticated handling of options.
 		nullable = nullable || (t.Kind() == reflect.Ptr && len(s.Enum) > 0 && opts.NullableEnumInjectNull)
 	} else if isDefinedType(t) {
@@ -369,7 +378,7 @@ func fromGoType(t reflect.Type, opts GoTypeConfig) (*Schema, error) {
 		if ut, ok := t.(*untyped); ok {
 			t = ut.Type
 		}
-		r := defs.Ref(t)
+		r, _ := defs.Ref(t)
 		s = r
 	}
 
