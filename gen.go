@@ -26,7 +26,7 @@ func GenerateType(schema *Schema, file *jen.File) error {
 		return fmt.Errorf("schema does not refer to a type: %s", schema)
 	}
 
-	file.Type().Id(name).Add(generateType(schema)).Line()
+	file.Type().Id(name).Add(generateType(schema, schema)).Line()
 	return nil
 }
 
@@ -112,10 +112,19 @@ func deriveValueType(v any) Type {
 
 // generateType constructs a Go type. The nullable argument will make it
 // a pointer (*)
-func generateType(schema *Schema) jen.Code {
+func generateType(root, schema *Schema) jen.Code {
 	if schema == nil {
 		schema = &Schema{}
 	}
+
+	if schema.Ref != "" {
+		s, err := ResolveReference(ResolveConfig{}, schema.Ref, root)
+		if err != nil {
+			panic(fmt.Errorf("reference %q: %w", schema.Ref, err))
+		}
+		schema = s
+	}
+
 	types := deriveSchemaType(schema)
 
 	// If no type exists or more than two types exists without one
@@ -141,7 +150,7 @@ func generateType(schema *Schema) jen.Code {
 	case TypeBoolean:
 		c = jen.Bool()
 	case TypeArray:
-		c = jen.Index().Add(generateType(schema.Items))
+		c = jen.Index().Add(generateType(root, schema.Items))
 	case TypeNumber:
 		c = jen.Qual("encoding/json", "Number")
 	case TypeString:
@@ -149,7 +158,7 @@ func generateType(schema *Schema) jen.Code {
 	case TypeInteger:
 		c = jen.Int()
 	case TypeObject:
-		c = generateObject(schema)
+		c = generateObject(root, schema)
 	}
 
 	// if not required and the type is not a ref type like array, make
@@ -162,7 +171,7 @@ func generateType(schema *Schema) jen.Code {
 
 var caser = cases.Title(language.AmericanEnglish)
 
-func generateObject(schema *Schema) jen.Code {
+func generateObject(root, schema *Schema) jen.Code {
 	var props []string
 	for name, _ := range schema.Properties {
 		props = append(props, name)
@@ -181,7 +190,7 @@ func generateObject(schema *Schema) jen.Code {
 			tag += ",omitempty"
 		}
 
-		typ := generateType(&prop)
+		typ := generateType(root, &prop)
 		stmt := jen.Id(caser.String(name)).Add(typ)
 		if tag != "" {
 			stmt = stmt.Tag(map[string]string{"json": tag})
