@@ -2,8 +2,8 @@ package jsonschema
 
 import (
 	"errors"
-	"fmt"
 	"path"
+	"strconv"
 )
 
 var (
@@ -40,78 +40,120 @@ func Walk(root *Schema, fn WalkFunc) error {
 			return err
 		}
 	}
-
-	var walk func(string, *Schema, WalkFunc) error
-	walk = func(prefix string, root *Schema, fn WalkFunc) error {
-		var err error
-		iter(root, func(ptr string, schema *Schema) (c bool) {
-			p := path.Join(prefix, ptr)
-			if err = fn("/"+p, schema); err != nil {
-				// If fn returned Skip or SkipAll, reset the error and return early to
-				// prevent walking the skipped schema. If the error is not the special
-				// error Skip, c is set to false and the iteration stops.
-				if skip := errors.Is(err, Skip); skip || errors.Is(err, SkipAll) {
-					c, err = skip, nil
-				}
-				return c
-			}
-
-			err = walk(p, schema, fn)
-			return err == nil
-		})
-		return err
-	}
-	return walk("", root, fn)
+	return walkRec("", root, fn)
 }
 
-func iter(s *Schema, cont func(string, *Schema) bool) {
-	for keyword, schema := range map[string]*Schema{
-		"not":                   s.Not,
-		"if":                    s.If,
-		"then":                  s.Then,
-		"else":                  s.Else,
-		"items":                 s.Items,
-		"contains":              s.Contains,
-		"additionalProperties":  s.AdditionalProperties,
-		"propertyNames":         s.PropertyNames,
-		"unevaluatedItems":      s.UnevaluatedItems,
-		"unevaluatedProperties": s.UnevaluatedProperties,
-		"contentSchema":         s.ContentSchema,
-	} {
-		if schema == nil {
+func walkRec(ptr string, schema *Schema, fn WalkFunc) error {
+	var err error
+	for _, n := range nodes(schema) {
+		p := path.Join(ptr, n.keyword)
+
+		// If fn returns an error, it can be Skip or SkipAll or an actual error.
+		if err = fn("/"+p, n.schema); err != nil {
+			var cont bool
+			// If fn returned Skip or SkipAll, reset the error and return early to
+			// prevent walking the skipped schema. If the error is not the special
+			// error Skip, c is set to false and the iteration stops.
+			if skip := errors.Is(err, Skip); skip || errors.Is(err, SkipAll) {
+				// Skip and SkipAll are not really errors, so we null it
+				cont, err = skip, nil
+			}
+
+			// cont is true only if the returned error is Skip, otherwise the error
+			// is SkipAll or an actual error and will stop the walking.
+			if !cont {
+				return err
+			}
 			continue
 		}
-		if !cont(keyword, schema) {
-			return
+
+		n.set(*n.schema)
+		err = walkRec(p, n.schema, fn)
+		if err != nil {
+			break
 		}
+	}
+	return err
+}
+
+type node struct {
+	keyword string
+	schema  *Schema
+	set     func(Schema)
+}
+
+var children = []struct {
+	keyword string
+	get     func(*Schema) *Schema
+}{
+	{"not", func(s *Schema) *Schema { return s.Not }},
+	{"if", func(s *Schema) *Schema { return s.If }},
+	{"then", func(s *Schema) *Schema { return s.Then }},
+	{"else", func(s *Schema) *Schema { return s.Else }},
+	{"items", func(s *Schema) *Schema { return s.Items }},
+	{"contains", func(s *Schema) *Schema { return s.Contains }},
+	{"additionalProperties", func(s *Schema) *Schema { return s.AdditionalProperties }},
+	{"propertyNames", func(s *Schema) *Schema { return s.PropertyNames }},
+	{"unevaluatedItems", func(s *Schema) *Schema { return s.UnevaluatedItems }},
+	{"unevaluatedProperties", func(s *Schema) *Schema { return s.UnevaluatedProperties }},
+	{"contentSchema", func(s *Schema) *Schema { return s.ContentSchema }},
+}
+
+func sliceChildren(keyword string, arr []Schema) []node {
+	out := make([]node, len(arr))
+	for i := range arr {
+		i := i
+		out[i] = node{
+			keyword: keyword + "/" + strconv.Itoa(i),
+			schema:  &arr[i],
+			set: func(v Schema) {
+				arr[i] = v
+			},
+		}
+	}
+	return out
+}
+
+func mapChildren(keyword string, m map[string]Schema) []node {
+	out := make([]node, 0, len(m))
+	for name, v := range m {
+		name, v := name, v // capture
+		out = append(out, node{
+			keyword: keyword + "/" + name,
+			schema:  &v,
+			set: func(val Schema) {
+				m[name] = val
+			},
+		})
+	}
+	return out
+}
+
+func nodes(s *Schema) []node {
+	out := make([]node, 0, 16)
+	for _, c := range children {
+		if s1 := c.get(s); s1 == nil {
+			continue
+		}
+		c := c
+		out = append(out, node{
+			keyword: c.keyword,
+			schema:  c.get(s),
+			set: func(s1 Schema) {
+				*c.get(s) = s1
+			},
+		})
 	}
 
-	for keyword, schemas := range map[string][]Schema{
-		"allOf":       s.AllOf,
-		"anyOf":       s.AnyOf,
-		"oneOf":       s.OneOf,
-		"prefixItems": s.PrefixItems,
-	} {
-		for i := range schemas {
-			if !cont(fmt.Sprintf("%s/%d", keyword, i), &schemas[i]) {
-				return
-			}
-		}
-	}
+	out = append(out, sliceChildren("allOf", s.AllOf)...)
+	out = append(out, sliceChildren("anyOf", s.AnyOf)...)
+	out = append(out, sliceChildren("oneOf", s.OneOf)...)
+	out = append(out, sliceChildren("prefixItems", s.PrefixItems)...)
 
-	for keyword, schemas := range map[string]map[string]Schema{
-		"$defs":             s.Defs,
-		"dependentSchemas":  s.DependentSchemas,
-		"properties":        s.Properties,
-		"patternProperties": s.PatternProperties,
-	} {
-		for name := range schemas {
-			v := schemas[name]
-			if !cont(fmt.Sprintf("%s/%s", keyword, name), &v) {
-				schemas[name] = v
-				return
-			}
-			schemas[name] = v
-		}
-	}
+	out = append(out, mapChildren("$defs", s.Defs)...)
+	out = append(out, mapChildren("dependentSchemas", s.DependentSchemas)...)
+	out = append(out, mapChildren("properties", s.Properties)...)
+	out = append(out, mapChildren("patternProperties", s.PatternProperties)...)
+
+	return out
 }

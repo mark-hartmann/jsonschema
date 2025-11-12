@@ -183,38 +183,6 @@ func TestWalk(t *testing.T) {
 		Items: &Schema{},
 	}
 
-	ptrTest2 := Schema{
-		Comment: "modified",
-		AllOf: []Schema{
-			{
-				Comment: "modified",
-			},
-		},
-		Defs: map[string]Schema{
-			"foo": {
-				Comment: "replaced",
-				AnyOf: []Schema{
-					{Comment: "modified"},
-				},
-			},
-			"bar": {},
-		},
-		Items: &Schema{Comment: "modified"},
-	}
-
-	_ = Walk(&ptrTest, func(ptr string, schema *Schema) error {
-		if ptr == "/$defs/foo" {
-			*schema = Schema{Comment: "replaced", AnyOf: []Schema{{}}}
-		} else if ptr != "/$defs/bar" {
-			schema.Comment = "modified"
-		}
-		return nil
-	})
-
-	if !reflect.DeepEqual(ptrTest, ptrTest2) {
-		t.Errorf("\nhave: %s\nneed: %s", &ptrTest, &ptrTest2)
-	}
-
 	for i, cause := range []string{
 		"/items",
 		"/allOf/0",
@@ -230,6 +198,62 @@ func TestWalk(t *testing.T) {
 		if err == nil {
 			t.Errorf("expected error at test %d, got nil", i)
 		}
+	}
+}
+
+func TestWalk_Modifying(t *testing.T) {
+	ptrTest := Schema{
+		Defs: map[string]Schema{
+			"foo": {},
+			"bar": {},
+		},
+		AllOf: []Schema{
+			{},
+			{},
+		},
+		AdditionalProperties: &False,
+	}
+
+	ptrTest2 := Schema{
+		Defs: map[string]Schema{
+			"foo": {Comment: "replaced"},
+			"bar": {},
+		},
+		AllOf: []Schema{
+			{Comment: "modified"},
+			{},
+		},
+		AdditionalProperties: &Schema{
+			Comment: "replaced",
+			Type:    TypeSet{TypeArray},
+			Items: &Schema{
+				Type: TypeSet{TypeNumber},
+			},
+		},
+	}
+
+	_ = Walk(&ptrTest, func(ptr string, schema *Schema) error {
+		if ptr == "/$defs/foo" {
+			*schema = Schema{Comment: "replaced"}
+		} else if ptr == "/allOf/0" {
+			schema.Comment = "modified"
+		} else if ptr == "/additionalProperties" {
+			*schema = Schema{
+				Comment: "replaced",
+				Type:    TypeSet{TypeArray},
+				Items:   &Schema{Type: TypeSet{TypeInteger}},
+			}
+		} else if ptr == "/additionalProperties/items" {
+			*schema = Schema{
+				Type: TypeSet{TypeNumber},
+			}
+		}
+		return nil
+	})
+
+	if !reflect.DeepEqual(ptrTest, ptrTest2) {
+		t.Errorf("\nhave: %s\nneed: %s", &ptrTest, &ptrTest2)
+		t.FailNow()
 	}
 }
 
