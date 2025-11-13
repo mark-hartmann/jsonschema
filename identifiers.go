@@ -1,6 +1,7 @@
 package jsonschema
 
 import (
+	"context"
 	"net/url"
 )
 
@@ -16,12 +17,12 @@ type Identifiers struct {
 func ComputeIdentifiers(root Schema) (map[string]Identifiers, error) {
 	base, _ := url.Parse(root.ID)
 	m := make(map[string]Identifiers)
-	_ = Walk(&root, func(ptr string, s *Schema) error {
+	_ = Walk(context.Background(), &root, func(_ context.Context, scope Scope, s *Schema) error {
 		// Copy the schema because we need to modify the ID for recursive calls.
 		// Weak copy is enough.
 		schema := *s
 
-		if ptr == "/" || (schema.ID == "" && schema.Anchor == "") {
+		if scope.Pointer == "/" || (schema.ID == "" && schema.Anchor == "") {
 			return nil
 		}
 
@@ -36,10 +37,10 @@ func ComputeIdentifiers(root Schema) (map[string]Identifiers, error) {
 
 			m2, _ := ComputeIdentifiers(schema)
 			for k, v := range m2 {
-				encURI := base.String() + "#" + ptr + k
+				encURI := base.String() + "#" + scope.Pointer + k
 				v.EnclosingResourceURIs = append(v.EnclosingResourceURIs, encURI)
 
-				m[ptr+k] = v
+				m[scope.Pointer+k] = v
 			}
 
 			ids.BaseURI = base.ResolveReference(id).String()
@@ -47,18 +48,18 @@ func ComputeIdentifiers(root Schema) (map[string]Identifiers, error) {
 			err = Skip
 		} else {
 			ids.BaseURI = base.String()
-			ids.CanonResourcePointerURI = ids.BaseURI + "#" + ptr
+			ids.CanonResourcePointerURI = ids.BaseURI + "#" + scope.Pointer
 		}
 
 		if schema.Anchor != "" {
 			ids.CanonResourcePlainURI = ids.BaseURI + "#" + schema.Anchor
 		}
 
-		if encURI := base.String() + "#" + ptr; encURI != ids.CanonResourcePointerURI {
+		if encURI := base.String() + "#" + scope.Pointer; encURI != ids.CanonResourcePointerURI {
 			ids.EnclosingResourceURIs = append(ids.EnclosingResourceURIs, encURI)
 		}
 
-		m[ptr] = ids
+		m[scope.Pointer] = ids
 		return err
 	})
 

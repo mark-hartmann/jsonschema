@@ -1,6 +1,7 @@
 package jsonschema_test
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,8 +19,10 @@ func TestWalk(t *testing.T) {
 	uri, _ := url.Parse("file:///testdata/miscellaneous-examples/conditional-validation-if-else.schema.json")
 	schema, _ := loader.Load(nil, uri)
 
+	ctx := context.Background()
+
 	var l1 []struct{}
-	err := Walk(schema, func(_ string, _ *Schema) error {
+	err := Walk(ctx, schema, func(ctx context.Context, _ Scope, _ *Schema) error {
 		l1 = append(l1, struct{}{})
 		return SkipAll
 	})
@@ -43,9 +46,9 @@ func TestWalk(t *testing.T) {
 		"/properties/membershipNumber",
 	}
 
-	err = Walk(schema, func(s string, s1 *Schema) error {
-		if s != "/" {
-			l2 = append(l2, s)
+	err = Walk(ctx, schema, func(ctx context.Context, scope Scope, s1 *Schema) error {
+		if scope.Pointer != "/" {
+			l2 = append(l2, scope.Pointer)
 			return Skip
 		}
 		return nil
@@ -75,9 +78,9 @@ func TestWalk(t *testing.T) {
 		"/else/properties/membershipNumber",
 	}
 
-	err = Walk(schema, func(s string, _ *Schema) error {
-		if s != "/" {
-			l3 = append(l3, s)
+	err = Walk(ctx, schema, func(ctx context.Context, scope Scope, _ *Schema) error {
+		if scope.Pointer != "/" {
+			l3 = append(l3, scope.Pointer)
 		}
 		return nil
 	})
@@ -95,10 +98,10 @@ func TestWalk(t *testing.T) {
 	}
 
 	s := ""
-	if e := Walk(&Schema{AllOf: []Schema{
+	if e := Walk(ctx, &Schema{AllOf: []Schema{
 		{Properties: map[string]Schema{"foo": {}}},
-	}}, func(ptr string, _ *Schema) error {
-		s = ptr
+	}}, func(ctx context.Context, scope Scope, _ *Schema) error {
+		s = scope.Pointer
 		return nil
 	}); e != nil {
 		t.Logf("expected no error, got %v", err)
@@ -110,7 +113,7 @@ func TestWalk(t *testing.T) {
 		t.FailNow()
 	}
 
-	err = Walk(&False, func(_ string, _ *Schema) error {
+	err = Walk(ctx, &False, func(_ context.Context, _ Scope, _ *Schema) error {
 		return errors.New("unexpected error")
 	})
 
@@ -131,11 +134,11 @@ func TestWalk(t *testing.T) {
 
 	// Example for a "filtered" WalkFunc.
 	filterWalkFunc := func(fn WalkFunc, filter func(kw string, s *Schema) bool) WalkFunc {
-		return func(ptr string, schema *Schema) error {
-			if ptr == "/" {
-				return fn(ptr, schema)
+		return func(ctx context.Context, scope Scope, schema *Schema) error {
+			if scope.Pointer == "/" {
+				return fn(ctx, scope, schema)
 			}
-			segments := strings.Split(ptr, "/")
+			segments := strings.Split(scope.Pointer, "/")
 			keyword := segments[len(segments)-1]
 			switch keyword {
 			case "not", "if", "then", "else", "items", "contains", "additionalProperties", "propertyNames":
@@ -144,7 +147,7 @@ func TestWalk(t *testing.T) {
 			}
 
 			if filter(keyword, schema) {
-				return fn(ptr, schema)
+				return fn(ctx, scope, schema)
 			}
 			return Skip
 		}
@@ -158,9 +161,9 @@ func TestWalk(t *testing.T) {
 	filterFunc := func(kw string, s *Schema) bool {
 		return kw == "allOf" && s.IsTrue()
 	}
-	_ = Walk(&filterTestSchema, filterWalkFunc(func(ptr string, schema *Schema) error {
-		if ptr != "/" {
-			l4 = append(l4, ptr)
+	_ = Walk(ctx, &filterTestSchema, filterWalkFunc(func(ctx context.Context, scope Scope, schema *Schema) error {
+		if scope.Pointer != "/" {
+			l4 = append(l4, scope.Pointer)
 		}
 		return nil
 	}, filterFunc))
@@ -188,8 +191,8 @@ func TestWalk(t *testing.T) {
 		"/allOf/0",
 		"/$defs/foo",
 	} {
-		err = Walk(&ptrTest, func(ptr string, schema *Schema) error {
-			if ptr == cause {
+		err = Walk(ctx, &ptrTest, func(ctx context.Context, scope Scope, schema *Schema) error {
+			if scope.Pointer == cause {
 				return errors.New("unexpected error")
 			}
 			return nil
@@ -232,18 +235,20 @@ func TestWalk_Modifying(t *testing.T) {
 		},
 	}
 
-	_ = Walk(&ptrTest, func(ptr string, schema *Schema) error {
-		if ptr == "/$defs/foo" {
+	ctx := context.Background()
+
+	_ = Walk(ctx, &ptrTest, func(ctx context.Context, scope Scope, schema *Schema) error {
+		if scope.Pointer == "/$defs/foo" {
 			*schema = Schema{Comment: "replaced"}
-		} else if ptr == "/allOf/0" {
+		} else if scope.Pointer == "/allOf/0" {
 			schema.Comment = "modified"
-		} else if ptr == "/additionalProperties" {
+		} else if scope.Pointer == "/additionalProperties" {
 			*schema = Schema{
 				Comment: "replaced",
 				Type:    TypeSet{TypeArray},
 				Items:   &Schema{Type: TypeSet{TypeInteger}},
 			}
-		} else if ptr == "/additionalProperties/items" {
+		} else if scope.Pointer == "/additionalProperties/items" {
 			*schema = Schema{
 				Type: TypeSet{TypeNumber},
 			}
@@ -271,7 +276,8 @@ func ExampleWalk() {
 	s := Schema{}
 	_ = json.Unmarshal([]byte(p), &s)
 
-	err := Walk(&s, func(ptr string, s *Schema) error {
+	ctx := context.Background()
+	err := Walk(ctx, &s, func(ctx context.Context, scope Scope, s *Schema) error {
 		if s.Ref != "" {
 			s2, err := ResolveReference(ResolveConfig{}, s.Ref, s)
 			if err != nil {

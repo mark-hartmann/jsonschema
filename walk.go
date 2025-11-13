@@ -1,6 +1,7 @@
 package jsonschema
 
 import (
+	"context"
 	"errors"
 	"path"
 	"strconv"
@@ -11,15 +12,20 @@ var (
 	SkipAll = errors.New("skip everything and stop the walk")
 )
 
-// WalkFunc is called by Walk for each schema. The ptr argument contains the
-// JSON pointer that points to the schema, starting from the root schema.
+type Scope struct {
+	// Pointer is the JSON pointer that points to the schema, starting from
+	// the current root schema.
+	Pointer string
+}
+
+// WalkFunc is called by Walk for each schema.
 //
 // The error result returned by the function controls how Walk continues.
 // If the function returns the special error Skip, Walk skips any schemas
 // defined in current node/schema, while SkipAll will skip all remaining schemas.
 // If the function returns a non-nil error, Walk stops entirely and returns
 // that error.
-type WalkFunc func(ptr string, schema *Schema) error
+type WalkFunc func(ctx context.Context, state Scope, schema *Schema) error
 
 // Walk walks the schema tree rooted at root, calling fn for each schema, including
 // root. The schemas are not walked in lexical order. The WalkFunc is first called
@@ -32,24 +38,34 @@ type WalkFunc func(ptr string, schema *Schema) error
 //	  *schema = Schema{AllOf: []Schema{/*...*/}}
 //	  return nil
 //	}
-func Walk(root *Schema, fn WalkFunc) error {
-	if err := fn("/", root); err != nil {
+func Walk(ctx context.Context, schema *Schema, fn WalkFunc) error {
+	scope := Scope{
+		Pointer: "/",
+	}
+	if err := fn(ctx, scope, schema); err != nil {
 		if errors.Is(err, Skip) || errors.Is(err, SkipAll) {
 			return nil
 		} else {
 			return err
 		}
 	}
-	return walkRec("", root, fn)
+	return walkRec(ctx, scope, schema, fn)
 }
 
-func walkRec(ptr string, schema *Schema, fn WalkFunc) error {
+func walkRec(ctx context.Context, scope Scope, schema *Schema, fn WalkFunc) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
 	var err error
 	for _, n := range nodes(schema) {
-		p := path.Join(ptr, n.keyword)
+		cScope := scope
+		cScope.Pointer = path.Join(scope.Pointer, n.keyword)
 
 		// If fn returns an error, it can be Skip or SkipAll or an actual error.
-		if err = fn("/"+p, n.schema); err != nil {
+		if err = fn(ctx, cScope, n.schema); err != nil {
 			var cont bool
 			// If fn returned Skip or SkipAll, reset the error and return early to
 			// prevent walking the skipped schema. If the error is not the special
@@ -68,7 +84,7 @@ func walkRec(ptr string, schema *Schema, fn WalkFunc) error {
 		}
 
 		n.set(*n.schema)
-		err = walkRec(p, n.schema, fn)
+		err = walkRec(ctx, cScope, n.schema, fn)
 		if err != nil {
 			break
 		}
