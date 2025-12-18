@@ -202,6 +202,55 @@ func TestWalk(t *testing.T) {
 			t.Errorf("expected error at test %d, got nil", i)
 		}
 	}
+
+	schema = &Schema{
+		ID:   "https://example.com/root.json",
+		Type: TypeSet{TypeObject},
+		Properties: map[string]Schema{
+			"inner": {
+				ID:   "inner.json",
+				Type: TypeSet{TypeObject},
+				Properties: map[string]Schema{
+					"deep": {
+						ID: "t/inner.json",
+						OneOf: []Schema{
+							{Type: TypeSet{TypeString}, Anchor: "fff"},
+							{Type: TypeSet{TypeNull}},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	err = Walk(ctx, schema, func(ctx context.Context, scope Scope, _ *Schema) error {
+		if scope.Root != schema {
+			return errors.New("unexpected root resource")
+		}
+		var id string
+		switch scope.Pointer {
+		case "/":
+			id = "https://example.com/root.json"
+		case "/properties/inner":
+			id = "inner.json"
+		case "/properties/inner/properties/deep":
+			id = "t/inner.json"
+		case "/properties/inner/properties/deep/oneOf/0":
+			id = "t/inner.json"
+		case "/properties/inner/properties/deep/oneOf/1":
+			id = "t/inner.json"
+		}
+
+		if scope.Resource.ID != id {
+			return fmt.Errorf("expected id of %q to be %q, got %q", scope.Pointer, id, scope.Resource.ID)
+		}
+		return nil
+	})
+
+	if err != nil {
+		t.Logf(err.Error())
+		t.FailNow()
+	}
 }
 
 func TestWalk_Modifying(t *testing.T) {

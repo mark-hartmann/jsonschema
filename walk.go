@@ -13,8 +13,12 @@ var (
 )
 
 type Scope struct {
+	// Root is the schema that comprises the entire JSON document.
+	Root *Schema
+	// Resource is the resource root of the subschema with its own base URI,
+	Resource *Schema
 	// Pointer is the JSON pointer that points to the schema, starting from
-	// the current root schema.
+	// the JSON document root.
 	Pointer string
 }
 
@@ -40,7 +44,9 @@ type WalkFunc func(ctx context.Context, state Scope, schema *Schema) error
 //	}
 func Walk(ctx context.Context, schema *Schema, fn WalkFunc) error {
 	scope := Scope{
-		Pointer: "/",
+		Root:     schema,
+		Resource: schema,
+		Pointer:  "/",
 	}
 	if err := fn(ctx, scope, schema); err != nil {
 		if errors.Is(err, Skip) || errors.Is(err, SkipAll) {
@@ -62,6 +68,10 @@ func walkRec(ctx context.Context, scope Scope, schema *Schema, fn WalkFunc) erro
 	var err error
 	for _, n := range nodes(schema) {
 		cScope := scope
+		if n.schema.ID != "" {
+			cScope.Resource = n.schema
+		}
+
 		cScope.Pointer = path.Join(scope.Pointer, n.keyword)
 
 		// If fn returns an error, it can be Skip or SkipAll or an actual error.
