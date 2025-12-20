@@ -3,6 +3,7 @@ package jsonschema
 import (
 	"context"
 	"errors"
+	"net/url"
 	"path"
 	"strconv"
 )
@@ -20,6 +21,53 @@ type Scope struct {
 	// Pointer is the JSON pointer that points to the schema, starting from
 	// the JSON document root.
 	Pointer string
+}
+
+// BaseURI returns the base URI of the current scope.
+func (s Scope) BaseURI() (*url.URL, error) {
+	base, err := url.Parse(s.Root.ID)
+	if err == nil && s.Resource.ID != "" {
+		base, err = base.Parse(s.Resource.ID)
+	}
+	return base, err
+}
+
+// Identifiers computes the [Identifiers] of the schema specified in the scope, excluding
+// the enclosing resource identifiers unless the enclosing document contains a direct
+// reference to the schema.
+func (s Scope) Identifiers(schema Schema) (Identifiers, error) {
+	var (
+		baseURI *url.URL
+		rootURI *url.URL
+		ids     Identifiers
+		err     error
+	)
+
+	baseURI, err = s.BaseURI()
+	if err != nil {
+		return ids, err
+	}
+	rootURI, err = url.Parse(s.Root.ID)
+	if err != nil {
+		return ids, err
+	}
+
+	if schema.ID != "" {
+		ids.BaseURI = baseURI.String()
+		ids.CanonResourcePointerURI = ids.BaseURI + "#"
+	} else {
+		ids.BaseURI = baseURI.String()
+		ids.CanonResourcePointerURI = ids.BaseURI + "#" + s.Pointer
+	}
+
+	if schema.Anchor != "" {
+		ids.CanonResourcePlainURI = ids.BaseURI + "#" + schema.Anchor
+	}
+
+	if encURI := rootURI.String() + "#" + s.Pointer; encURI != ids.CanonResourcePointerURI {
+		ids.EnclosingResourceURIs = append(ids.EnclosingResourceURIs, encURI)
+	}
+	return ids, nil
 }
 
 // WalkFunc is called by Walk for each schema.

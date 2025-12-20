@@ -26,14 +26,10 @@ func ComputeIdentifiers(root Schema) (map[string]Identifiers, error) {
 			return nil
 		}
 
-		var (
-			err error
-			ids Identifiers
-		)
-
+		var err error
+		baseURI, _ := scope.BaseURI()
 		if schema.ID != "" {
-			id, _ := url.Parse(schema.ID)
-			schema.ID = base.ResolveReference(id).String()
+			schema.ID = baseURI.String()
 
 			m2, _ := ComputeIdentifiers(schema)
 			for k, v := range m2 {
@@ -43,23 +39,11 @@ func ComputeIdentifiers(root Schema) (map[string]Identifiers, error) {
 				m[scope.Pointer+k] = v
 			}
 
-			ids.BaseURI = base.ResolveReference(id).String()
-			ids.CanonResourcePointerURI = ids.BaseURI + "#"
+			// We return the control error Skip so Walk does not process the nodes
+			// already handled by our recursive call to ComputeIdentifiers.
 			err = Skip
-		} else {
-			ids.BaseURI = base.String()
-			ids.CanonResourcePointerURI = ids.BaseURI + "#" + scope.Pointer
 		}
-
-		if schema.Anchor != "" {
-			ids.CanonResourcePlainURI = ids.BaseURI + "#" + schema.Anchor
-		}
-
-		if encURI := base.String() + "#" + scope.Pointer; encURI != ids.CanonResourcePointerURI {
-			ids.EnclosingResourceURIs = append(ids.EnclosingResourceURIs, encURI)
-		}
-
-		m[scope.Pointer] = ids
+		m[scope.Pointer], _ = scope.Identifiers(schema)
 		return err
 	})
 
