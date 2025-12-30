@@ -21,6 +21,15 @@ type Scope struct {
 	// Pointer is the JSON pointer that points to the schema, starting from
 	// the JSON document root.
 	Pointer string
+
+	// Keyword is the origin keyword of the current Schema node.
+	Keyword string
+	// Key is the map key if the schema is part of an object keyword such
+	// as [Schema.Properties] or [Schema.Defs].
+	Key string
+	// Index is the array index if the schema is part of an array keyword
+	// such as [Schema.AnyOf].
+	Index int
 }
 
 // BaseURI returns the base URI of the current scope.
@@ -120,7 +129,10 @@ func walkRec(ctx context.Context, scope Scope, schema *Schema, fn WalkFunc) erro
 			cScope.Resource = n.schema
 		}
 
-		cScope.Pointer = path.Join(scope.Pointer, n.keyword)
+		cScope.Pointer = path.Join(scope.Pointer, n.ptr)
+		cScope.Keyword = n.keyword
+		cScope.Key = n.key
+		cScope.Index = n.index
 
 		// If fn returns an error, it can be Skip or SkipAll or an actual error.
 		if err = fn(ctx, cScope, n.schema); err != nil {
@@ -152,6 +164,9 @@ func walkRec(ctx context.Context, scope Scope, schema *Schema, fn WalkFunc) erro
 
 type node struct {
 	keyword string
+	ptr     string
+	key     string
+	index   int
 	schema  *Schema
 	set     func(Schema)
 }
@@ -178,11 +193,13 @@ func sliceChildren(keyword string, arr []Schema) []node {
 	for i := range arr {
 		i := i
 		out[i] = node{
-			keyword: keyword + "/" + strconv.Itoa(i),
+			keyword: keyword,
+			ptr:     keyword + "/" + strconv.Itoa(i),
 			schema:  &arr[i],
 			set: func(v Schema) {
 				arr[i] = v
 			},
+			index: i,
 		}
 	}
 	return out
@@ -193,11 +210,13 @@ func mapChildren(keyword string, m map[string]Schema) []node {
 	for name, v := range m {
 		name, v := name, v // capture
 		out = append(out, node{
-			keyword: keyword + "/" + name,
+			keyword: keyword,
+			ptr:     keyword + "/" + name,
 			schema:  &v,
 			set: func(val Schema) {
 				m[name] = val
 			},
+			key: name,
 		})
 	}
 	return out
@@ -212,6 +231,7 @@ func nodes(s *Schema) []node {
 		c := c
 		out = append(out, node{
 			keyword: c.keyword,
+			ptr:     c.keyword,
 			schema:  c.get(s),
 			set: func(s1 Schema) {
 				*c.get(s) = s1
