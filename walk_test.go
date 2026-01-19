@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	. "jsonschema"
+	"maps"
 	"net/url"
 	"reflect"
 	"slices"
@@ -47,8 +48,8 @@ func TestWalk(t *testing.T) {
 	}
 
 	err = Walk(ctx, schema, func(ctx context.Context, scope Scope, s1 *Schema) error {
-		if scope.Pointer != "/" {
-			l2 = append(l2, scope.Pointer)
+		if scope.PointerRoot != "/" {
+			l2 = append(l2, scope.PointerRoot)
 			return Skip
 		}
 		return nil
@@ -79,8 +80,8 @@ func TestWalk(t *testing.T) {
 	}
 
 	err = Walk(ctx, schema, func(ctx context.Context, scope Scope, _ *Schema) error {
-		if scope.Pointer != "/" {
-			l3 = append(l3, scope.Pointer)
+		if scope.PointerRoot != "/" {
+			l3 = append(l3, scope.PointerRoot)
 		}
 		return nil
 	})
@@ -101,7 +102,7 @@ func TestWalk(t *testing.T) {
 	if e := Walk(ctx, &Schema{AllOf: []Schema{
 		{Properties: map[string]Schema{"foo": {}}},
 	}}, func(ctx context.Context, scope Scope, _ *Schema) error {
-		s = scope.Pointer
+		s = scope.PointerRoot
 		return nil
 	}); e != nil {
 		t.Logf("expected no error, got %v", err)
@@ -135,10 +136,10 @@ func TestWalk(t *testing.T) {
 	// Example for a "filtered" WalkFunc.
 	filterWalkFunc := func(fn WalkFunc, filter func(kw string, s *Schema) bool) WalkFunc {
 		return func(ctx context.Context, scope Scope, schema *Schema) error {
-			if scope.Pointer == "/" {
+			if scope.PointerRoot == "/" {
 				return fn(ctx, scope, schema)
 			}
-			segments := strings.Split(scope.Pointer, "/")
+			segments := strings.Split(scope.PointerRoot, "/")
 			keyword := segments[len(segments)-1]
 			switch keyword {
 			case "not", "if", "then", "else", "items", "contains", "additionalProperties", "propertyNames":
@@ -162,8 +163,8 @@ func TestWalk(t *testing.T) {
 		return kw == "allOf" && s.IsTrue()
 	}
 	_ = Walk(ctx, &filterTestSchema, filterWalkFunc(func(ctx context.Context, scope Scope, schema *Schema) error {
-		if scope.Pointer != "/" {
-			l4 = append(l4, scope.Pointer)
+		if scope.PointerRoot != "/" {
+			l4 = append(l4, scope.PointerRoot)
 		}
 		return nil
 	}, filterFunc))
@@ -192,7 +193,7 @@ func TestWalk(t *testing.T) {
 		"/$defs/foo",
 	} {
 		err = Walk(ctx, &ptrTest, func(ctx context.Context, scope Scope, schema *Schema) error {
-			if scope.Pointer == cause {
+			if scope.PointerRoot == cause {
 				return errors.New("unexpected error")
 			}
 			return nil
@@ -223,12 +224,21 @@ func TestWalk(t *testing.T) {
 		},
 	}
 
+	ptrs := map[string]string{
+		"/":                                 "/",
+		"/properties/inner":                 "/properties/inner",
+		"/properties/inner/properties/deep": "/properties/deep",
+		"/properties/inner/properties/deep/oneOf/0": "/properties/deep/oneOf/0",
+		"/properties/inner/properties/deep/oneOf/1": "/properties/deep/oneOf/1",
+	}
+
+	ptrsHave := make(map[string]string)
 	err = Walk(ctx, schema, func(ctx context.Context, scope Scope, _ *Schema) error {
 		if scope.Root != schema {
 			return errors.New("unexpected root resource")
 		}
 		var id string
-		switch scope.Pointer {
+		switch scope.PointerRoot {
 		case "/":
 			id = "https://example.com/root.json"
 		case "/properties/inner":
@@ -242,13 +252,20 @@ func TestWalk(t *testing.T) {
 		}
 
 		if scope.Resource.ID != id {
-			return fmt.Errorf("expected id of %q to be %q, got %q", scope.Pointer, id, scope.Resource.ID)
+			return fmt.Errorf("expected id of %q to be %q, got %q", scope.PointerRoot, id, scope.Resource.ID)
 		}
+
+		ptrsHave[scope.PointerRoot] = scope.Pointer
 		return nil
 	})
 
 	if err != nil {
-		t.Logf(err.Error())
+		t.Logf("%s", err.Error())
+		t.FailNow()
+	}
+
+	if !maps.Equal(ptrsHave, ptrs) {
+		t.Logf("expected %v, got %v", ptrs, ptrsHave)
 		t.FailNow()
 	}
 }
@@ -287,17 +304,17 @@ func TestWalk_Modifying(t *testing.T) {
 	ctx := context.Background()
 
 	_ = Walk(ctx, &ptrTest, func(ctx context.Context, scope Scope, schema *Schema) error {
-		if scope.Pointer == "/$defs/foo" {
+		if scope.PointerRoot == "/$defs/foo" {
 			*schema = Schema{Comment: "replaced"}
-		} else if scope.Pointer == "/allOf/0" {
+		} else if scope.PointerRoot == "/allOf/0" {
 			schema.Comment = "modified"
-		} else if scope.Pointer == "/additionalProperties" {
+		} else if scope.PointerRoot == "/additionalProperties" {
 			*schema = Schema{
 				Comment: "replaced",
 				Type:    TypeSet{TypeArray},
 				Items:   &Schema{Type: TypeSet{TypeInteger}},
 			}
-		} else if scope.Pointer == "/additionalProperties/items" {
+		} else if scope.PointerRoot == "/additionalProperties/items" {
 			*schema = Schema{
 				Type: TypeSet{TypeNumber},
 			}

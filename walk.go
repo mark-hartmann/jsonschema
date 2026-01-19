@@ -18,10 +18,13 @@ type Scope struct {
 	Root *Schema
 	// Resource is the resource root of the subschema with its own base URI,
 	Resource *Schema
-	// Pointer is the JSON pointer that points to the schema, starting from
+	// PointerRoot is a JSON pointer that points to the schema, starting from
 	// the JSON document root.
-	Pointer string
+	PointerRoot string
 
+	// Pointer is the JSON pointer that points to the schema, starting from
+	// [Scope.Resource].
+	Pointer string
 	// Keyword is the origin keyword of the current Schema node.
 	Keyword string
 	// Key is the map key if the schema is part of an object keyword such
@@ -101,16 +104,16 @@ type WalkFunc func(ctx context.Context, state Scope, schema *Schema) error
 //	}
 func Walk(ctx context.Context, schema *Schema, fn WalkFunc) error {
 	scope := Scope{
-		Root:     schema,
-		Resource: schema,
-		Pointer:  "/",
+		Root:        schema,
+		Resource:    schema,
+		PointerRoot: "/",
+		Pointer:     "/",
 	}
 	if err := fn(ctx, scope, schema); err != nil {
 		if errors.Is(err, Skip) || errors.Is(err, SkipAll) {
 			return nil
-		} else {
-			return err
 		}
+		return err
 	}
 	return walkRec(ctx, scope, schema, fn)
 }
@@ -127,9 +130,11 @@ func walkRec(ctx context.Context, scope Scope, schema *Schema, fn WalkFunc) erro
 		cScope := scope
 		if n.schema.ID != "" {
 			cScope.Resource = n.schema
+			cScope.Pointer = "/"
 		}
 
-		cScope.Pointer = path.Join(scope.Pointer, n.ptr)
+		cScope.PointerRoot = path.Join(cScope.PointerRoot, n.ptr)
+		cScope.Pointer = path.Join(cScope.Pointer, n.ptr)
 		cScope.Keyword = n.keyword
 		cScope.Key = n.key
 		cScope.Index = n.index
