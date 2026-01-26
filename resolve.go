@@ -69,8 +69,9 @@ func ResolveReference(config ResolveConfig, ref string, resource *Schema) (*Sche
 	isPointerReference := len(ref) == 0 || len(ref) > 2 && ref[0] == '#' && ref[1] == '/'
 
 	var path []string
+	var refPath string
 	if isPointerReference {
-		path = getUnescapedPath(uri.Fragment)
+		refPath = uri.Fragment
 	} else {
 		uri = config.resourceURI.ResolveReference(uri)
 		if isEmbedded(uri.String(), config.computedIdentifiers) {
@@ -102,10 +103,15 @@ func ResolveReference(config ResolveConfig, ref string, resource *Schema) (*Sche
 		}
 
 		if uri.Path != "" {
-			path = getUnescapedPath(uri.Path)
+			refPath = uri.Path
 		} else {
-			path = getUnescapedPath(uri.Fragment)
+			refPath = uri.Fragment
 		}
+	}
+
+	path = getUnescapedPath(refPath)
+	if err := ValidateReferencePointer(refPath); err != nil {
+		return nil, fmt.Errorf("invalid reference %s: %w", fmtPos(config, path, len(path)), err)
 	}
 
 	config.ignoreRefs = true
@@ -123,6 +129,8 @@ func fmtPos(config ResolveConfig, path []string, pos int) string {
 	return fmt.Sprintf("%s%s", res, fmtPtrPosition(path, pos))
 }
 
+// fmtPtrPosition prints the resource schema id including the reference pointer
+// up to pos. Use len(path) to append the whole pointer.
 func fmtPtrPosition(path []string, pos int) string {
 	var sb strings.Builder
 	sb.WriteString("#/")
@@ -161,50 +169,69 @@ func resolveRef(config ResolveConfig, current *Schema, path []string, pos int) (
 	}
 
 	config.ignoreRefs = false
+
+	var res *Schema
+	s, pos, err := fastResolve(current, &res, path, pos)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve %s: %w", fmtPos(config, path, len(path)), err)
+	}
+	if res != nil {
+		config.resource = res
+		uri, _ := url.Parse(current.ID)
+		config.resourceURI = config.resourceURI.ResolveReference(uri)
+	}
+
+	if s.Ref != "" {
+		return resolveRef(config, s, path, pos)
+	}
+	return s, err
+}
+
+// fastResolve follows the path until pos=len(path) or the path cannot be followed
+// further. If a resource schema is detected during traversal of the path, it is
+// written to res.
+func fastResolve(schema *Schema, res **Schema, path []string, pos int) (*Schema, int, error) {
+	// We reached the end of the path, return status quo.
+	if len(path[pos:]) == 0 {
+		return schema, pos, nil
+	}
+
+	// Only set resource schema if not root
+	if pos != 0 && schema.ID != "" {
+		*res = schema
+	}
+
 	segment := path[pos]
 	switch segment {
 	case "allOf", "anyOf", "oneOf", "prefixItems":
-		if len(path[pos:]) == 1 {
-			return nil, fmt.Errorf("missing array index at %q", fmtPos(config, path, pos+1))
-		}
-
-		nextSegment := path[pos+1]
-
 		var col []Schema
 		switch segment {
 		case "allOf":
-			col = current.AllOf
+			col = schema.AllOf
 		case "anyOf":
-			col = current.AnyOf
+			col = schema.AnyOf
 		case "oneOf":
-			col = current.OneOf
-		case "prefixItems":
-			col = current.PrefixItems
+			col = schema.OneOf
+		default:
+			col = schema.PrefixItems
 		}
 
-		i, err := strconv.Atoi(nextSegment)
-		if err != nil {
-			return nil, fmt.Errorf("invalid array index %q at %q: %w", nextSegment, fmtPos(config, path, pos+1), err)
-		} else if len(col) <= i {
-			return nil, fmt.Errorf("index out of bounds (%d/%d) at %q", i, len(col)-1, fmtPos(config, path, pos+1))
+		i, _ := strconv.Atoi(path[pos+1])
+		if len(col) <= i {
+			return nil, pos, fmt.Errorf("index out of bounds (%d/%d) at %q", i, len(col)-1, fmtPtrPosition(path, pos+1))
 		}
-
-		return resolveRef(config, &col[i], path, pos+2)
+		return fastResolve(&col[i], res, path, pos+2)
 	case "$defs", "dependentSchemas", "properties", "patternProperties":
-		if len(path[pos:]) == 1 {
-			return nil, fmt.Errorf("missing key at %q", fmtPos(config, path, pos+1))
-		}
-
 		var col map[string]Schema
 		switch segment {
 		case "$defs":
-			col = current.Defs
+			col = schema.Defs
 		case "dependentSchemas":
-			col = current.DependentSchemas
+			col = schema.DependentSchemas
 		case "properties":
-			col = current.Properties
-		case "patternProperties":
-			col = current.PatternProperties
+			col = schema.Properties
+		default:
+			col = schema.PatternProperties
 		}
 
 		var (
@@ -212,44 +239,43 @@ func resolveRef(config ResolveConfig, current *Schema, path []string, pos int) (
 			ok bool
 		)
 		if s, ok = col[path[pos+1]]; !ok {
-			return nil, fmt.Errorf("unknown key %q at %q", path[pos+1], fmtPos(config, path, pos+1))
+			return nil, pos, fmt.Errorf("unknown key %q at %q", path[pos+1], fmtPtrPosition(path, pos+1))
 		}
-
-		current = &s
-		return resolveRef(config, current, path, pos+2)
-	case "not", "if", "then", "else", "items", "contains", "additionalProperties", "propertyNames":
+		return fastResolve(&s, res, path, pos+2)
+	case "not", "if", "then", "else", "items", "contains", "additionalProperties", "propertyNames", "unevaluatedItems", "unevaluatedProperties", "contentSchema":
 		var s *Schema
 		switch segment {
 		case "not":
-			s = current.Not
+			s = schema.Not
 		case "if":
-			s = current.If
+			s = schema.If
 		case "then":
-			s = current.Then
+			s = schema.Then
 		case "else":
-			s = current.Else
+			s = schema.Else
 		case "items":
-			s = current.Items
+			s = schema.Items
 		case "contains":
-			s = current.Contains
+			s = schema.Contains
 		case "additionalProperties":
-			s = current.AdditionalProperties
+			s = schema.AdditionalProperties
 		case "propertyNames":
-			s = current.PropertyNames
+			s = schema.PropertyNames
 		case "unevaluatedItems":
-			s = current.UnevaluatedItems
+			s = schema.UnevaluatedItems
 		case "unevaluatedProperties":
-			s = current.UnevaluatedProperties
-		case "contentSchema":
-			s = current.ContentSchema
+			s = schema.UnevaluatedProperties
+		default:
+			s = schema.ContentSchema
 		}
 
 		if s == nil {
-			return nil, fmt.Errorf("missing schema at %q", fmtPos(config, path, pos+1))
+			return nil, pos, fmt.Errorf("expected non-nil schema at %q", fmtPtrPosition(path, pos+1))
 		}
-		return resolveRef(config, s, path, pos+1)
+		return fastResolve(s, res, path, pos+1)
 	}
-	return nil, fmt.Errorf("unknown keyword %q at %q", segment, fmtPos(config, path, pos))
+
+	return nil, pos, fmt.Errorf("unknown segment %q", segment)
 }
 
 func getUnescapedPath(ref string) []string {

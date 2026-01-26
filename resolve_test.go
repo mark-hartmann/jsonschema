@@ -113,12 +113,12 @@ func TestResolveReference(t *testing.T) {
 		{
 			name:    "forward slash equals empty string",
 			args:    args{ref: "#/items/", resource: root},
-			wantErr: `unknown keyword "" at "https://example.net/root.json#/items"`,
+			wantErr: `invalid reference https://example.net/root.json#/items/: invalid segment "": unknown keyword`,
 		},
 		{
 			name:    "nil subschema",
 			args:    args{ref: "#/propertyNames", resource: root},
-			wantErr: `missing schema at "https://example.net/root.json#/propertyNames"`,
+			wantErr: `failed to resolve https://example.net/root.json#/propertyNames: expected non-nil schema at "#/propertyNames"`,
 		},
 		{
 			name: "nested non-nil subschema",
@@ -130,12 +130,12 @@ func TestResolveReference(t *testing.T) {
 		{
 			name:    "unknown keyword in the middle of the pointer",
 			args:    args{ref: "#/items/unknown/additionalProperties", resource: root},
-			wantErr: `unknown keyword "unknown" at "https://example.net/root.json#/items"`,
+			wantErr: `invalid reference https://example.net/root.json#/items/unknown/additionalProperties: invalid segment "unknown": unknown keyword`,
 		},
 		{
 			name:    "unknown schema definition followed by keyword",
 			args:    args{ref: "#/$defs/unknown/additionalProperties", resource: root},
-			wantErr: `unknown key "unknown" at "https://example.net/root.json#/$defs"`,
+			wantErr: `failed to resolve https://example.net/root.json#/$defs/unknown/additionalProperties: unknown key "unknown" at "#/$defs"`,
 		},
 		{
 			name:    "feinted reference pointer",
@@ -145,7 +145,7 @@ func TestResolveReference(t *testing.T) {
 		{
 			name:    "missing def name",
 			args:    args{ref: "#/$defs", resource: root},
-			wantErr: `missing key at "https://example.net/root.json#/$defs"`,
+			wantErr: `invalid reference https://example.net/root.json#/$defs: invalid segment "$defs": does not point to schema`,
 		},
 		{
 			name: "absolute uri",
@@ -236,27 +236,24 @@ func TestResolveReference(t *testing.T) {
 		{
 			name:    "array index out of bounds",
 			args:    args{ref: "#/$defs/absolute-refs/oneOf/2", resource: root},
-			wantErr: `index out of bounds (2/1) at "https://example.net/abs.json#/$defs/absolute-refs/oneOf"`,
+			wantErr: `failed to resolve https://example.net/root.json#/$defs/absolute-refs/oneOf/2: index out of bounds (2/1) at "#/$defs/absolute-refs/oneOf"`,
 		},
 		{
+			// the reference is validated first, so the resource id does not change like
+			// previously, so it's root.json and not abs.json
 			name:    "invalid array index",
 			args:    args{ref: "#/$defs/absolute-refs/oneOf/two", resource: root},
-			wantErr: `invalid array index "two" at "https://example.net/abs.json#/$defs/absolute-refs/oneOf": strconv.Atoi: parsing "two": invalid syntax`,
+			wantErr: `invalid reference https://example.net/root.json#/$defs/absolute-refs/oneOf/two: invalid segment "two": invalid array index: "two"`,
 		},
 		{
 			name:    "missing array index",
 			args:    args{ref: "#/$defs/absolute-refs/oneOf", resource: root},
-			wantErr: `missing array index at "https://example.net/abs.json#/$defs/absolute-refs/oneOf"`,
+			wantErr: `invalid reference https://example.net/root.json#/$defs/absolute-refs/oneOf: invalid segment "oneOf": does not point to schema`,
 		},
 		{
 			name:    "unknown keyword",
 			args:    args{ref: "#/$defs/absolute-refs/test", resource: root},
-			wantErr: `unknown keyword "test" at "https://example.net/abs.json#/$defs/absolute-refs"`,
-		},
-		{
-			name:    "unknown keyword",
-			args:    args{ref: "#/$defs/absolute-refs/test", resource: root},
-			wantErr: `unknown keyword "test" at "https://example.net/abs.json#/$defs/absolute-refs"`,
+			wantErr: `invalid reference https://example.net/root.json#/$defs/absolute-refs/test: invalid segment "test": unknown keyword`,
 		},
 		{
 			name: "escaping tilde",
@@ -294,14 +291,18 @@ func TestResolveReference(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := ResolveReference(tt.args.config, tt.args.ref, tt.args.resource)
 			if (err != nil) != (tt.wantErr != "") {
-				t.Errorf("ResolveReference() error = %v, wantErr %v", err, tt.wantErr != "")
+				if err != nil {
+					t.Errorf("unexpected error\nhave: %s\nneed: %v", err, nil)
+				} else {
+					t.Errorf("expected error, got nil\nhave: %v\nneed: %s", nil, tt.wantErr)
+				}
 				return
 			}
 
 			if tt.wantErr != "" && !reflect.DeepEqual(err.Error(), tt.wantErr) {
-				t.Errorf("ResolveReference() got = %v, want = %v", err, tt.wantErr)
+				t.Errorf("error does not equal expected error\nhave: %v\nneed: %v", err, tt.wantErr)
 			} else if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("ResolveReference() got = %v, want = %v", got, tt.want)
+				t.Errorf("have does not equal need\nhave: %v\nneed = %v", got, tt.want)
 			}
 		})
 	}
@@ -405,7 +406,8 @@ func TestResolveReference_Embedded(t *testing.T) {
 	for i, testData := range tests2 {
 		s, err := ResolveReference(ResolveConfig{Loader: loader}, testData.ref, root)
 		if err != nil && testData.expected != nil {
-			t.Errorf("unexpected error %s, test case at %d (%s)", err, i, testData.ref)
+			t.Errorf("unexpected error in test case %d (%s)\nhave: %s", i, testData.ref, err)
+			continue
 		}
 
 		if !reflect.DeepEqual(s, testData.expected) {
