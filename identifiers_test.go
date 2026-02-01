@@ -18,6 +18,10 @@ func TestComputeIdentifiers(t *testing.T) {
 	m, _ := ComputeIdentifiers(*schema)
 
 	tests := map[string]Identifiers{
+		"/": {
+			BaseURI:                 "https://example.com/root.json",
+			CanonResourcePointerURI: "https://example.com/root.json#",
+		},
 		"/$defs/A": {
 			BaseURI:                 "https://example.com/root.json",
 			CanonResourcePlainURI:   "https://example.com/root.json#foo",
@@ -83,9 +87,7 @@ func TestComputeIdentifiers(t *testing.T) {
 	}
 
 	if len(tests) != len(m) {
-		t.Errorf("mismatching lengths")
-		t.Errorf("need %d", len(tests))
-		t.Errorf("have %d", len(m))
+		t.Errorf("mismatching lengths: expected %d, got %d", len(tests), len(m))
 		t.FailNow()
 	}
 

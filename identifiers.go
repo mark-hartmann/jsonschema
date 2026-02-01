@@ -12,11 +12,16 @@ type Identifiers struct {
 	EnclosingResourceURIs   []string
 }
 
-// ComputeIdentifiers returns all schema identifiers defined in root's sub schemas, excluding
+// ComputeIdentifiers returns all schema identifiers defined in root's sub schemas, including
 // root. The map key is a JSON pointer that points to the id defining schema.
 func ComputeIdentifiers(root Schema) (map[string]Identifiers, error) {
 	base, _ := url.Parse(root.ID)
 	m := make(map[string]Identifiers)
+	m["/"] = Identifiers{
+		BaseURI:                 root.ID,
+		CanonResourcePointerURI: root.ID + "#",
+	}
+
 	_ = Walk(context.Background(), &root, func(_ context.Context, scope Scope, s *Schema) error {
 		// Copy the schema because we need to modify the ID for recursive calls.
 		// Weak copy is enough.
@@ -33,6 +38,9 @@ func ComputeIdentifiers(root Schema) (map[string]Identifiers, error) {
 
 			m2, _ := ComputeIdentifiers(schema)
 			for k, v := range m2 {
+				if k == "/" {
+					continue
+				}
 				encURI := base.String() + "#" + scope.Pointer + k
 				v.EnclosingResourceURIs = append(v.EnclosingResourceURIs, encURI)
 
