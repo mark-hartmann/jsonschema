@@ -17,7 +17,7 @@ var (
 // defined in current node/schema, while SkipAll will skip all remaining schemas.
 // If the function returns a non-nil error, Walk stops entirely and returns
 // that error.
-type WalkFunc[T any] func(ctx context.Context, state *Scope[T], schema *Schema) error
+type WalkFunc[T any] func(ctx context.Context, state *Scope[T]) error
 
 // Walk walks the schema tree rooted at root, calling fn for each schema, including
 // root. The schemas are not walked in lexical order. The WalkFunc is first called
@@ -32,16 +32,16 @@ type WalkFunc[T any] func(ctx context.Context, state *Scope[T], schema *Schema) 
 //	}
 func Walk[T any](ctx context.Context, schema *Schema, meta MetaFunc[T], fn WalkFunc[T]) error {
 	scope, _ := NewScope(schema, meta)
-	if err := fn(ctx, scope, schema); err != nil {
+	if err := fn(ctx, scope); err != nil {
 		if errors.Is(err, Skip) || errors.Is(err, SkipAll) {
 			return nil
 		}
 		return err
 	}
-	return walkRec(ctx, scope, schema, fn)
+	return walkRec(ctx, scope, fn)
 }
 
-func walkRec[T any](ctx context.Context, scope *Scope[T], schema *Schema, fn WalkFunc[T]) error {
+func walkRec[T any](ctx context.Context, scope *Scope[T], fn WalkFunc[T]) error {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
@@ -49,11 +49,11 @@ func walkRec[T any](ctx context.Context, scope *Scope[T], schema *Schema, fn Wal
 	}
 
 	var err error
-	for _, n := range nodes(schema) {
+	for _, n := range nodes(scope.Schema) {
 		next, _ := scope.Next(n.schema, n.Step)
 
 		// If fn returns an error, it can be Skip or SkipAll or an actual error.
-		if err = fn(ctx, next, n.schema); err != nil {
+		if err = fn(ctx, next); err != nil {
 			var cont bool
 			// If fn returned Skip or SkipAll, reset the error and return early to
 			// prevent walking the skipped schema. If the error is not the special
@@ -72,7 +72,7 @@ func walkRec[T any](ctx context.Context, scope *Scope[T], schema *Schema, fn Wal
 		}
 
 		n.set(*n.schema)
-		err = walkRec(ctx, next, n.schema, fn)
+		err = walkRec(ctx, next, fn)
 		if err != nil {
 			break
 		}

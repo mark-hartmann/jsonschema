@@ -23,7 +23,7 @@ func TestWalk(t *testing.T) {
 	ctx := context.Background()
 
 	var l1 []struct{}
-	err := Walk(ctx, schema, nil, func(ctx context.Context, _ *Scope[any], _ *Schema) error {
+	err := Walk(ctx, schema, nil, func(ctx context.Context, _ *Scope[any]) error {
 		l1 = append(l1, struct{}{})
 		return SkipAll
 	})
@@ -47,7 +47,7 @@ func TestWalk(t *testing.T) {
 		"/properties/membershipNumber",
 	}
 
-	err = Walk(ctx, schema, nil, func(ctx context.Context, scope *Scope[any], s1 *Schema) error {
+	err = Walk(ctx, schema, nil, func(ctx context.Context, scope *Scope[any]) error {
 		if pr := scope.PointerRoot(); pr != "/" {
 			l2 = append(l2, pr)
 			return Skip
@@ -79,7 +79,7 @@ func TestWalk(t *testing.T) {
 		"/else/properties/membershipNumber",
 	}
 
-	err = Walk(ctx, schema, nil, func(ctx context.Context, scope *Scope[any], _ *Schema) error {
+	err = Walk(ctx, schema, nil, func(ctx context.Context, scope *Scope[any]) error {
 		if pr := scope.PointerRoot(); pr != "/" {
 			l3 = append(l3, pr)
 		}
@@ -101,7 +101,7 @@ func TestWalk(t *testing.T) {
 	s := ""
 	if e := Walk(ctx, &Schema{AllOf: []Schema{
 		{Properties: map[string]Schema{"foo": {}}},
-	}}, nil, func(ctx context.Context, scope *Scope[any], _ *Schema) error {
+	}}, nil, func(ctx context.Context, scope *Scope[any]) error {
 		s = scope.PointerRoot()
 		return nil
 	}); e != nil {
@@ -114,7 +114,7 @@ func TestWalk(t *testing.T) {
 		t.FailNow()
 	}
 
-	err = Walk(ctx, &False, nil, func(_ context.Context, _ *Scope[any], _ *Schema) error {
+	err = Walk(ctx, &False, nil, func(_ context.Context, _ *Scope[any]) error {
 		return errors.New("unexpected error")
 	})
 
@@ -135,9 +135,9 @@ func TestWalk(t *testing.T) {
 
 	// Example for a "filtered" WalkFunc.
 	filterWalkFunc := func(fn WalkFunc[any], filter func(kw string, s *Schema) bool) WalkFunc[any] {
-		return func(ctx context.Context, scope *Scope[any], schema *Schema) error {
+		return func(ctx context.Context, scope *Scope[any]) error {
 			if scope.PointerRoot() == "/" {
-				return fn(ctx, scope, schema)
+				return fn(ctx, scope)
 			}
 			segments := strings.Split(scope.PointerRoot(), "/")
 			keyword := segments[len(segments)-1]
@@ -147,8 +147,8 @@ func TestWalk(t *testing.T) {
 				keyword = segments[len(segments)-2]
 			}
 
-			if filter(keyword, schema) {
-				return fn(ctx, scope, schema)
+			if filter(keyword, scope.Schema) {
+				return fn(ctx, scope)
 			}
 			return Skip
 		}
@@ -162,7 +162,7 @@ func TestWalk(t *testing.T) {
 	filterFunc := func(kw string, s *Schema) bool {
 		return kw == "allOf" && s.IsTrue()
 	}
-	_ = Walk(ctx, &filterTestSchema, nil, filterWalkFunc(func(ctx context.Context, scope *Scope[any], schema *Schema) error {
+	_ = Walk(ctx, &filterTestSchema, nil, filterWalkFunc(func(ctx context.Context, scope *Scope[any]) error {
 		if scope.PointerRoot() != "/" {
 			l4 = append(l4, scope.PointerRoot())
 		}
@@ -192,7 +192,7 @@ func TestWalk(t *testing.T) {
 		"/allOf/0",
 		"/$defs/foo",
 	} {
-		err = Walk(ctx, &ptrTest, nil, func(ctx context.Context, scope *Scope[any], schema *Schema) error {
+		err = Walk(ctx, &ptrTest, nil, func(ctx context.Context, scope *Scope[any]) error {
 			if scope.PointerRoot() == cause {
 				return errors.New("unexpected error")
 			}
@@ -233,7 +233,7 @@ func TestWalk(t *testing.T) {
 	}
 
 	ptrsHave := make(map[string]string)
-	err = Walk(ctx, schema, nil, func(ctx context.Context, scope *Scope[any], _ *Schema) error {
+	err = Walk(ctx, schema, nil, func(ctx context.Context, scope *Scope[any]) error {
 		var id string
 		switch scope.PointerRoot() {
 		case "/":
@@ -304,7 +304,7 @@ func TestWalk_Modifying(t *testing.T) {
 
 	ctx := context.Background()
 
-	_ = Walk(ctx, &ptrTest, nil, func(ctx context.Context, scope *Scope[any], _ *Schema) error {
+	_ = Walk(ctx, &ptrTest, nil, func(ctx context.Context, scope *Scope[any]) error {
 		schema := scope.Schema
 		if scope.PointerRoot() == "/$defs/foo" {
 			*schema = Schema{Comment: "replaced"}
@@ -345,7 +345,7 @@ func ExampleWalk() {
 	_ = json.Unmarshal([]byte(p), &s)
 
 	ctx := context.Background()
-	err := Walk(ctx, &s, nil, func(ctx context.Context, scope *Scope[any], _ *Schema) error {
+	err := Walk(ctx, &s, nil, func(ctx context.Context, scope *Scope[any]) error {
 		s := scope.Schema
 		if s.Ref != "" {
 			s2, err := ResolveReference(ResolveConfig{}, s.Ref, s)

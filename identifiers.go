@@ -68,7 +68,7 @@ func ComputeIdentifiers(root Schema) (map[string]Identifiers, error) {
 		CanonResourcePointerURI: root.ID + "#",
 	}
 
-	_ = Walk(context.Background(), &root, computeScopeIds, func(_ context.Context, scope *Scope[Identifiers], s *Schema) error {
+	_ = Walk(context.Background(), &root, computeScopeIds, func(_ context.Context, scope *Scope[Identifiers]) error {
 		if scope.Meta != nil {
 			ids[scope.PointerRoot()] = *scope.Meta
 		}
