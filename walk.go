@@ -3,84 +3,12 @@ package jsonschema
 import (
 	"context"
 	"errors"
-	"net/url"
-	"path"
-	"strconv"
 )
 
 var (
 	Skip    = errors.New("skip this node")
 	SkipAll = errors.New("skip everything and stop the walk")
 )
-
-type Scope struct {
-	// Root is the schema that comprises the entire JSON document.
-	Root *Schema
-	// Resource is the resource root of the subschema with its own base URI,
-	Resource *Schema
-	// PointerRoot is a JSON pointer that points to the schema, starting from
-	// the JSON document root.
-	PointerRoot string
-
-	// Pointer is the JSON pointer that points to the schema, starting from
-	// [Scope.Resource].
-	Pointer string
-	// Keyword is the origin keyword of the current Schema node.
-	Keyword string
-	// Key is the map key if the schema is part of an object keyword such
-	// as [Schema.Properties] or [Schema.Defs].
-	Key string
-	// Index is the array index if the schema is part of an array keyword
-	// such as [Schema.AnyOf].
-	Index int
-}
-
-// BaseURI returns the base URI of the current scope.
-func (s Scope) BaseURI() (*url.URL, error) {
-	base, err := url.Parse(s.Root.ID)
-	if err == nil && s.Resource.ID != "" {
-		base, err = base.Parse(s.Resource.ID)
-	}
-	return base, err
-}
-
-// Identifiers computes the [Identifiers] of the schema specified in the scope, excluding
-// the enclosing resource identifiers unless the enclosing document contains a direct
-// reference to the schema.
-func (s Scope) Identifiers(schema Schema) (Identifiers, error) {
-	var (
-		baseURI *url.URL
-		rootURI *url.URL
-		ids     Identifiers
-		err     error
-	)
-
-	baseURI, err = s.BaseURI()
-	if err != nil {
-		return ids, err
-	}
-	rootURI, err = url.Parse(s.Root.ID)
-	if err != nil {
-		return ids, err
-	}
-
-	if schema.ID != "" {
-		ids.BaseURI = baseURI.String()
-		ids.CanonResourcePointerURI = ids.BaseURI + "#"
-	} else {
-		ids.BaseURI = baseURI.String()
-		ids.CanonResourcePointerURI = ids.BaseURI + "#" + s.Pointer
-	}
-
-	if schema.Anchor != "" {
-		ids.CanonResourcePlainURI = ids.BaseURI + "#" + schema.Anchor
-	}
-
-	if encURI := rootURI.String() + "#" + s.Pointer; encURI != ids.CanonResourcePointerURI {
-		ids.EnclosingResourceURIs = append(ids.EnclosingResourceURIs, encURI)
-	}
-	return ids, nil
-}
 
 // WalkFunc is called by Walk for each schema.
 //
@@ -89,7 +17,7 @@ func (s Scope) Identifiers(schema Schema) (Identifiers, error) {
 // defined in current node/schema, while SkipAll will skip all remaining schemas.
 // If the function returns a non-nil error, Walk stops entirely and returns
 // that error.
-type WalkFunc func(ctx context.Context, state Scope, schema *Schema) error
+type WalkFunc[T any] func(ctx context.Context, state *Scope[T], schema *Schema) error
 
 // Walk walks the schema tree rooted at root, calling fn for each schema, including
 // root. The schemas are not walked in lexical order. The WalkFunc is first called
@@ -102,13 +30,8 @@ type WalkFunc func(ctx context.Context, state Scope, schema *Schema) error
 //	  *schema = Schema{AllOf: []Schema{/*...*/}}
 //	  return nil
 //	}
-func Walk(ctx context.Context, schema *Schema, fn WalkFunc) error {
-	scope := Scope{
-		Root:        schema,
-		Resource:    schema,
-		PointerRoot: "/",
-		Pointer:     "/",
-	}
+func Walk[T any](ctx context.Context, schema *Schema, meta MetaFunc[T], fn WalkFunc[T]) error {
+	scope, _ := NewScope(schema, meta)
 	if err := fn(ctx, scope, schema); err != nil {
 		if errors.Is(err, Skip) || errors.Is(err, SkipAll) {
 			return nil
@@ -118,7 +41,7 @@ func Walk(ctx context.Context, schema *Schema, fn WalkFunc) error {
 	return walkRec(ctx, scope, schema, fn)
 }
 
-func walkRec(ctx context.Context, scope Scope, schema *Schema, fn WalkFunc) error {
+func walkRec[T any](ctx context.Context, scope *Scope[T], schema *Schema, fn WalkFunc[T]) error {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
@@ -127,20 +50,10 @@ func walkRec(ctx context.Context, scope Scope, schema *Schema, fn WalkFunc) erro
 
 	var err error
 	for _, n := range nodes(schema) {
-		cScope := scope
-		if n.schema.ID != "" {
-			cScope.Resource = n.schema
-			cScope.Pointer = "/"
-		}
-
-		cScope.PointerRoot = path.Join(cScope.PointerRoot, n.ptr)
-		cScope.Pointer = path.Join(cScope.Pointer, n.ptr)
-		cScope.Keyword = n.keyword
-		cScope.Key = n.key
-		cScope.Index = n.index
+		next, _ := scope.Next(n.schema, n.Step)
 
 		// If fn returns an error, it can be Skip or SkipAll or an actual error.
-		if err = fn(ctx, cScope, n.schema); err != nil {
+		if err = fn(ctx, next, n.schema); err != nil {
 			var cont bool
 			// If fn returned Skip or SkipAll, reset the error and return early to
 			// prevent walking the skipped schema. If the error is not the special
@@ -159,7 +72,7 @@ func walkRec(ctx context.Context, scope Scope, schema *Schema, fn WalkFunc) erro
 		}
 
 		n.set(*n.schema)
-		err = walkRec(ctx, cScope, n.schema, fn)
+		err = walkRec(ctx, next, n.schema, fn)
 		if err != nil {
 			break
 		}
@@ -168,12 +81,9 @@ func walkRec(ctx context.Context, scope Scope, schema *Schema, fn WalkFunc) erro
 }
 
 type node struct {
-	keyword string
-	ptr     string
-	key     string
-	index   int
-	schema  *Schema
-	set     func(Schema)
+	schema *Schema
+	Step
+	set func(Schema)
 }
 
 var children = []struct {
@@ -198,13 +108,11 @@ func sliceChildren(keyword string, arr []Schema) []node {
 	for i := range arr {
 		i := i
 		out[i] = node{
-			keyword: keyword,
-			ptr:     keyword + "/" + strconv.Itoa(i),
-			schema:  &arr[i],
+			Step:   Step{Keyword: keyword, Index: ptr(i)},
+			schema: &arr[i],
 			set: func(v Schema) {
 				arr[i] = v
 			},
-			index: i,
 		}
 	}
 	return out
@@ -215,13 +123,11 @@ func mapChildren(keyword string, m map[string]Schema) []node {
 	for name, v := range m {
 		name, v := name, v // capture
 		out = append(out, node{
-			keyword: keyword,
-			ptr:     keyword + "/" + name,
-			schema:  &v,
+			Step:   Step{Keyword: keyword, Key: ptr(name)},
+			schema: &v,
 			set: func(val Schema) {
 				m[name] = val
 			},
-			key: name,
 		})
 	}
 	return out
@@ -235,9 +141,8 @@ func nodes(s *Schema) []node {
 		}
 		c := c
 		out = append(out, node{
-			keyword: c.keyword,
-			ptr:     c.keyword,
-			schema:  c.get(s),
+			Step:   Step{Keyword: c.keyword},
+			schema: c.get(s),
 			set: func(s1 Schema) {
 				*c.get(s) = s1
 			},

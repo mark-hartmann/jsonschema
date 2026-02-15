@@ -23,7 +23,7 @@ func TestWalk(t *testing.T) {
 	ctx := context.Background()
 
 	var l1 []struct{}
-	err := Walk(ctx, schema, func(ctx context.Context, _ Scope, _ *Schema) error {
+	err := Walk(ctx, schema, nil, func(ctx context.Context, _ *Scope[any], _ *Schema) error {
 		l1 = append(l1, struct{}{})
 		return SkipAll
 	})
@@ -47,9 +47,9 @@ func TestWalk(t *testing.T) {
 		"/properties/membershipNumber",
 	}
 
-	err = Walk(ctx, schema, func(ctx context.Context, scope Scope, s1 *Schema) error {
-		if scope.PointerRoot != "/" {
-			l2 = append(l2, scope.PointerRoot)
+	err = Walk(ctx, schema, nil, func(ctx context.Context, scope *Scope[any], s1 *Schema) error {
+		if pr := scope.PointerRoot(); pr != "/" {
+			l2 = append(l2, pr)
 			return Skip
 		}
 		return nil
@@ -79,9 +79,9 @@ func TestWalk(t *testing.T) {
 		"/else/properties/membershipNumber",
 	}
 
-	err = Walk(ctx, schema, func(ctx context.Context, scope Scope, _ *Schema) error {
-		if scope.PointerRoot != "/" {
-			l3 = append(l3, scope.PointerRoot)
+	err = Walk(ctx, schema, nil, func(ctx context.Context, scope *Scope[any], _ *Schema) error {
+		if pr := scope.PointerRoot(); pr != "/" {
+			l3 = append(l3, pr)
 		}
 		return nil
 	})
@@ -101,8 +101,8 @@ func TestWalk(t *testing.T) {
 	s := ""
 	if e := Walk(ctx, &Schema{AllOf: []Schema{
 		{Properties: map[string]Schema{"foo": {}}},
-	}}, func(ctx context.Context, scope Scope, _ *Schema) error {
-		s = scope.PointerRoot
+	}}, nil, func(ctx context.Context, scope *Scope[any], _ *Schema) error {
+		s = scope.PointerRoot()
 		return nil
 	}); e != nil {
 		t.Logf("expected no error, got %v", err)
@@ -114,7 +114,7 @@ func TestWalk(t *testing.T) {
 		t.FailNow()
 	}
 
-	err = Walk(ctx, &False, func(_ context.Context, _ Scope, _ *Schema) error {
+	err = Walk(ctx, &False, nil, func(_ context.Context, _ *Scope[any], _ *Schema) error {
 		return errors.New("unexpected error")
 	})
 
@@ -134,12 +134,12 @@ func TestWalk(t *testing.T) {
 	}
 
 	// Example for a "filtered" WalkFunc.
-	filterWalkFunc := func(fn WalkFunc, filter func(kw string, s *Schema) bool) WalkFunc {
-		return func(ctx context.Context, scope Scope, schema *Schema) error {
-			if scope.PointerRoot == "/" {
+	filterWalkFunc := func(fn WalkFunc[any], filter func(kw string, s *Schema) bool) WalkFunc[any] {
+		return func(ctx context.Context, scope *Scope[any], schema *Schema) error {
+			if scope.PointerRoot() == "/" {
 				return fn(ctx, scope, schema)
 			}
-			segments := strings.Split(scope.PointerRoot, "/")
+			segments := strings.Split(scope.PointerRoot(), "/")
 			keyword := segments[len(segments)-1]
 			switch keyword {
 			case "not", "if", "then", "else", "items", "contains", "additionalProperties", "propertyNames":
@@ -162,9 +162,9 @@ func TestWalk(t *testing.T) {
 	filterFunc := func(kw string, s *Schema) bool {
 		return kw == "allOf" && s.IsTrue()
 	}
-	_ = Walk(ctx, &filterTestSchema, filterWalkFunc(func(ctx context.Context, scope Scope, schema *Schema) error {
-		if scope.PointerRoot != "/" {
-			l4 = append(l4, scope.PointerRoot)
+	_ = Walk(ctx, &filterTestSchema, nil, filterWalkFunc(func(ctx context.Context, scope *Scope[any], schema *Schema) error {
+		if scope.PointerRoot() != "/" {
+			l4 = append(l4, scope.PointerRoot())
 		}
 		return nil
 	}, filterFunc))
@@ -192,8 +192,8 @@ func TestWalk(t *testing.T) {
 		"/allOf/0",
 		"/$defs/foo",
 	} {
-		err = Walk(ctx, &ptrTest, func(ctx context.Context, scope Scope, schema *Schema) error {
-			if scope.PointerRoot == cause {
+		err = Walk(ctx, &ptrTest, nil, func(ctx context.Context, scope *Scope[any], schema *Schema) error {
+			if scope.PointerRoot() == cause {
 				return errors.New("unexpected error")
 			}
 			return nil
@@ -226,19 +226,16 @@ func TestWalk(t *testing.T) {
 
 	ptrs := map[string]string{
 		"/":                                 "/",
-		"/properties/inner":                 "/properties/inner",
-		"/properties/inner/properties/deep": "/properties/deep",
-		"/properties/inner/properties/deep/oneOf/0": "/properties/deep/oneOf/0",
-		"/properties/inner/properties/deep/oneOf/1": "/properties/deep/oneOf/1",
+		"/properties/inner":                 "/",
+		"/properties/inner/properties/deep": "/",
+		"/properties/inner/properties/deep/oneOf/0": "/oneOf/0",
+		"/properties/inner/properties/deep/oneOf/1": "/oneOf/1",
 	}
 
 	ptrsHave := make(map[string]string)
-	err = Walk(ctx, schema, func(ctx context.Context, scope Scope, _ *Schema) error {
-		if scope.Root != schema {
-			return errors.New("unexpected root resource")
-		}
+	err = Walk(ctx, schema, nil, func(ctx context.Context, scope *Scope[any], _ *Schema) error {
 		var id string
-		switch scope.PointerRoot {
+		switch scope.PointerRoot() {
 		case "/":
 			id = "https://example.com/root.json"
 		case "/properties/inner":
@@ -251,11 +248,15 @@ func TestWalk(t *testing.T) {
 			id = "t/inner.json"
 		}
 
-		if scope.Resource.ID != id {
-			return fmt.Errorf("expected id of %q to be %q, got %q", scope.PointerRoot, id, scope.Resource.ID)
+		pr := scope
+		if scope.Schema.ID == "" {
+			pr = scope.ParentResource()
+		}
+		if pr.Schema.ID != id {
+			return fmt.Errorf("expected id of %q to be %q, got %q", scope.PointerRoot(), id, pr.Schema.ID)
 		}
 
-		ptrsHave[scope.PointerRoot] = scope.Pointer
+		ptrsHave[scope.PointerRoot()] = scope.Pointer()
 		return nil
 	})
 
@@ -265,7 +266,7 @@ func TestWalk(t *testing.T) {
 	}
 
 	if !maps.Equal(ptrsHave, ptrs) {
-		t.Logf("expected %v, got %v", ptrs, ptrsHave)
+		t.Logf("\nhave %+v\nneed %+v", ptrsHave, ptrs)
 		t.FailNow()
 	}
 }
@@ -303,18 +304,19 @@ func TestWalk_Modifying(t *testing.T) {
 
 	ctx := context.Background()
 
-	_ = Walk(ctx, &ptrTest, func(ctx context.Context, scope Scope, schema *Schema) error {
-		if scope.PointerRoot == "/$defs/foo" {
+	_ = Walk(ctx, &ptrTest, nil, func(ctx context.Context, scope *Scope[any], _ *Schema) error {
+		schema := scope.Schema
+		if scope.PointerRoot() == "/$defs/foo" {
 			*schema = Schema{Comment: "replaced"}
-		} else if scope.PointerRoot == "/allOf/0" {
+		} else if scope.PointerRoot() == "/allOf/0" {
 			schema.Comment = "modified"
-		} else if scope.PointerRoot == "/additionalProperties" {
+		} else if scope.PointerRoot() == "/additionalProperties" {
 			*schema = Schema{
 				Comment: "replaced",
 				Type:    TypeSet{TypeArray},
 				Items:   &Schema{Type: TypeSet{TypeInteger}},
 			}
-		} else if scope.PointerRoot == "/additionalProperties/items" {
+		} else if scope.PointerRoot() == "/additionalProperties/items" {
 			*schema = Schema{
 				Type: TypeSet{TypeNumber},
 			}
@@ -343,7 +345,8 @@ func ExampleWalk() {
 	_ = json.Unmarshal([]byte(p), &s)
 
 	ctx := context.Background()
-	err := Walk(ctx, &s, func(ctx context.Context, scope Scope, s *Schema) error {
+	err := Walk(ctx, &s, nil, func(ctx context.Context, scope *Scope[any], _ *Schema) error {
+		s := scope.Schema
 		if s.Ref != "" {
 			s2, err := ResolveReference(ResolveConfig{}, s.Ref, s)
 			if err != nil {
