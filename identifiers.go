@@ -24,7 +24,7 @@ func computeScopeIds(s *Scope[Identifiers]) *Identifiers {
 	}
 
 	ids := Identifiers{}
-	baseURI, _ := s.BaseURI()
+	baseURI := s.BaseURI()
 	ids.BaseURI = baseURI.String()
 	if s.atResource() {
 		ids.CanonResourcePointerURI = ids.BaseURI + "#"
@@ -37,12 +37,12 @@ func computeScopeIds(s *Scope[Identifiers]) *Identifiers {
 
 	// s.Step is how we got to this schema, so we have to start from s as current
 	steps := []string{s.Step.String()}
-	cURI, _ := s.URI()
+	cURI := s.URI()
 	c := s.Parent
 	for c != nil {
 		atResource := c.Schema != nil && c.Schema.ID != ""
 		if atResource {
-			uri, _ := c.BaseURI()
+			uri := c.BaseURI()
 			prts := make([]string, len(steps))
 			copy(prts, steps)
 			slices.Reverse(prts)

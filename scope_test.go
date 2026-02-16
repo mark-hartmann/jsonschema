@@ -79,12 +79,12 @@ func TestScope_PointerRoot(t *testing.T) {
 				t.Errorf("Pointer: have %q, need %q", s.Pointer(), test.pointer)
 			}
 
-			b, _ := scope.BaseURI()
+			b := scope.BaseURI()
 			if b.String() != test.baseURI {
 				t.Errorf("BaseURI: have %q, need %q", b, test.baseURI)
 			}
 
-			u, _ := scope.URI()
+			u := scope.URI()
 			if u.String() != test.uri {
 				t.Errorf("URI: have %q, need %q", u, test.uri)
 			}

@@ -118,33 +118,33 @@ func (s *Scope[T]) Pointer() string {
 	return s.buildPtr(false)
 }
 
-// PointerRoot returns the complete pointer, relative to the root node, usually
+// PointerRoot returns the complete pointer relative to the root node, usually
 // representing the JSON document root.
 func (s *Scope[T]) PointerRoot() string {
 	return s.buildPtr(true)
 }
 
-func (s *Scope[T]) URI() (*url.URL, error) {
+func (s *Scope[T]) URI() *url.URL {
 	uri := url.URL{}
-	if baseUri, _ := s.BaseURI(); baseUri != nil {
+	if baseUri := s.BaseURI(); baseUri != nil {
 		uri = *baseUri
 	}
 	if ptr := s.Pointer(); ptr != "/" {
 		uri.Fragment = ptr
 	}
-	return &uri, nil
+	return &uri
 }
 
 // BaseURI returns the scopes current base uri.
-func (s *Scope[T]) BaseURI() (*url.URL, error) {
+func (s *Scope[T]) BaseURI() *url.URL {
 	if s.baseUri != nil {
-		return s.baseUri, nil
+		return s.baseUri
 	}
 	res := s.ParentResource()
 	if res == nil {
-		return nil, nil
+		return nil
 	}
-	return res.baseUri, nil
+	return res.baseUri
 }
 
 func (s *Scope[T]) ParentResource() *Scope[T] {
