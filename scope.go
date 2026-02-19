@@ -8,6 +8,7 @@ import (
 	"strings"
 )
 
+// Step represents the step taken to reach the current schema.
 type Step struct {
 	// Keyword is the origin keyword of the current Schema node.
 	Keyword string
@@ -36,19 +37,14 @@ type MetaFunc[T any] func(s *Scope[T]) *T
 // current scope.
 func NewScope[T any](schema *Schema, metaFactory MetaFunc[T]) (*Scope[T], error) {
 	s := &Scope[T]{Schema: schema, metaFunc: metaFactory}
-	if schema != nil && schema.ID != "" {
-		var err error
-		s.baseUri, err = url.Parse(schema.ID)
-		if err != nil {
-			return s, fmt.Errorf("failed to parse resource schema id %s: %w", schema.ID, err)
-		}
-	}
-	if metaFactory != nil {
-		s.Meta = metaFactory(s)
-	}
-	return s, nil
+	return s, s.init()
 }
 
+// Scope represents a single evaluation frame in a JSON Schema traversal.
+//
+// Each Scope points to its Parent, forming a chain that models the dynamic
+// evaluation stack. It holds the current Schema node, the Step taken to reach
+// it and optional Metadata.
 type Scope[T any] struct {
 	Parent *Scope[T]
 	Schema *Schema
@@ -64,6 +60,7 @@ type Scope[T any] struct {
 	baseUri *url.URL
 }
 
+// Next creates a new Scope with the current scope as parent.
 func (s *Scope[T]) Next(schema *Schema, step Step) (*Scope[T], error) {
 	n := &Scope[T]{
 		Parent:   s,
@@ -71,23 +68,30 @@ func (s *Scope[T]) Next(schema *Schema, step Step) (*Scope[T], error) {
 		Step:     step,
 		metaFunc: s.metaFunc,
 	}
-	if schema != nil && schema.ID != "" {
-		uri, err := url.Parse(schema.ID)
+	return n, n.init()
+}
+
+// init prepares the scope for further use by computing values like baseUri
+// and creating the metadata object.
+func (s *Scope[T]) init() error {
+	if s.atResource() {
+		uri, err := url.Parse(s.Schema.ID)
 		if err != nil {
-			return n, fmt.Errorf("failed to parse resource schema id %s: %w", schema.ID, err)
+			return fmt.Errorf("failed to parse resource schema id %s: %w", s.Schema.ID, err)
 		}
-		pr := n.ParentResource()
-		if pr == nil {
-			n.baseUri = uri
+
+		// If there is a parent resource, we have to resolve the uri.
+		if p := s.ParentResource(); p != nil {
+			s.baseUri = p.baseUri.ResolveReference(uri)
 		} else {
-			n.baseUri = pr.baseUri.ResolveReference(uri)
+			s.baseUri = uri
 		}
 	}
 
-	if n.metaFunc != nil {
-		n.Meta = n.metaFunc(n)
+	if s.metaFunc != nil {
+		s.Meta = s.metaFunc(s)
 	}
-	return n, nil
+	return nil
 }
 
 func (s *Scope[T]) atResource() bool {
