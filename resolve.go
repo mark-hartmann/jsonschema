@@ -17,7 +17,6 @@ type ResolveConfig struct {
 	rootResourceLoader  Loader
 	resourceURI         *url.URL
 	computedIdentifiers map[string]Identifiers
-	ignoreRefs          bool
 }
 
 func applyDefaults(config *ResolveConfig, resource *Schema) {
@@ -114,7 +113,6 @@ func ResolveReference(config ResolveConfig, ref string, resource *Schema) (*Sche
 		return nil, fmt.Errorf("invalid reference %s: %w", fmtPos(config, path, len(path)), err)
 	}
 
-	config.ignoreRefs = true
 	return resolveRef(config, config.resource, path, 0)
 }
 
@@ -146,7 +144,7 @@ func fmtPtrPosition(path []string, pos int) string {
 func resolveRef(config ResolveConfig, current *Schema, path []string, pos int) (*Schema, error) {
 	// Return if the current schema is not set, or we reached the end of
 	// the reference path without the schema having a reference itself.
-	if current == nil || (len(path[pos:]) == 0 && current.Ref == "") {
+	if current == nil || len(path[pos:]) == 0 {
 		return current, nil
 	}
 
@@ -155,20 +153,6 @@ func resolveRef(config ResolveConfig, current *Schema, path []string, pos int) (
 		config.resource = current
 		config.resourceURI = config.resourceURI.ResolveReference(uri)
 	}
-
-	if current.Ref != "" /* && schema.Ref != "#" */ && (!config.ignoreRefs && len(path[pos:]) == 0) {
-		var err error
-		r := current.Ref
-		if current, err = ResolveReference(config, current.Ref, current); err != nil {
-			return nil, fmt.Errorf("failed to resolve {\"$ref\": %q} at %q: %w", r, fmtPos(config, path, pos), err)
-		}
-	}
-
-	if len(path[pos:]) == 0 {
-		return current, nil
-	}
-
-	config.ignoreRefs = false
 
 	var res *Schema
 	s, pos, err := fastResolve(current, &res, path, pos)
@@ -181,9 +165,6 @@ func resolveRef(config ResolveConfig, current *Schema, path []string, pos int) (
 		config.resourceURI = config.resourceURI.ResolveReference(uri)
 	}
 
-	if s.Ref != "" {
-		return resolveRef(config, s, path, pos)
-	}
 	return s, err
 }
 

@@ -93,9 +93,9 @@ func TestResolveReference(t *testing.T) {
 			},
 		},
 		{
-			name:    "reference to external reference without loader",
-			args:    args{ref: "#/$defs/single/additionalProperties", resource: root},
-			wantErr: `failed to resolve {"$ref": "other.json"} at "https://example.net/root.json#/$defs/single/additionalProperties": unable to locate non-embedded resource {"$id": "https://example.net/other.json"}: no loader configured`,
+			name: "reference to external reference without loader",
+			args: args{ref: "#/$defs/single/additionalProperties", resource: root},
+			want: &Schema{Ref: "other.json"},
 		},
 		{
 			name: "non-nil subschema",
@@ -138,9 +138,9 @@ func TestResolveReference(t *testing.T) {
 			wantErr: `failed to resolve https://example.net/root.json#/$defs/unknown/additionalProperties: unknown key "unknown" at "#/$defs"`,
 		},
 		{
-			name:    "feinted reference pointer",
-			args:    args{ref: "#/$defs/feinted-ref", resource: root},
-			wantErr: `failed to resolve {"$ref": "/items/items"} at "https://example.net/root.json#/$defs/feinted-ref": unable to locate non-embedded resource {"$id": "https://example.net/items/items"}: no loader configured`,
+			name: "feinted reference pointer",
+			args: args{ref: "#/$defs/feinted-ref", resource: root},
+			want: &Schema{Ref: "/items/items"},
 		},
 		{
 			name:    "missing def name",
@@ -181,43 +181,7 @@ func TestResolveReference(t *testing.T) {
 				config:   ResolveConfig{Loader: NewEmbeddedLoader(testdataFS)},
 				resource: root,
 			},
-			want: &Schema{
-				Schema:      "https://json-schema.org/draft/2020-12/schema",
-				ID:          "file:///testdata/miscellaneous-examples/arrays.schema.json",
-				Comment:     "https://json-schema.org/learn/miscellaneous-examples#arrays-of-things",
-				Description: "A representation of a person, company, organization, or place",
-				Type:        TypeSet{TypeObject},
-				Properties: map[string]Schema{
-					"fruits": {
-						Type: TypeSet{TypeArray},
-						Items: &Schema{
-							Type: TypeSet{TypeString},
-						},
-					},
-					"vegetables": {
-						Type: TypeSet{TypeArray},
-						Items: &Schema{
-							Ref: "#/$defs/veggie",
-						},
-					},
-				},
-				Defs: map[string]Schema{
-					"veggie": {
-						Type: TypeSet{TypeObject},
-						Properties: map[string]Schema{
-							"veggieLike": {
-								Type:        TypeSet{TypeBoolean},
-								Description: "Do I like this vegetable?",
-							},
-							"veggieName": {
-								Type:        TypeSet{TypeString},
-								Description: "The name of the vegetable.",
-							},
-						},
-						Required: []string{"veggieName", "veggieLike"},
-					},
-				},
-			},
+			want: &Schema{Ref: "file:///testdata/miscellaneous-examples/arrays.schema.json"},
 		},
 		{
 			name: "existing subschema in array different index",
@@ -226,12 +190,7 @@ func TestResolveReference(t *testing.T) {
 				config:   ResolveConfig{Loader: NewEmbeddedLoader(testdataFS)},
 				resource: root,
 			},
-			want: &Schema{
-				Type: TypeSet{TypeArray},
-				Items: &Schema{
-					Ref: "#/$defs/veggie",
-				},
-			},
+			want: &Schema{Ref: "file:///testdata/miscellaneous-examples/arrays.schema.json#/properties/vegetables"},
 		},
 		{
 			name:    "array index out of bounds",
@@ -278,12 +237,7 @@ func TestResolveReference(t *testing.T) {
 		{
 			name: "content schema",
 			args: args{ref: "#/$defs/vocabs/$defs/contentSchema", resource: root},
-			want: &Schema{
-				Defs: map[string]Schema{
-					"fo~o": True,
-					"ba/r": True,
-				},
-			},
+			want: &Schema{Ref: "#/$defs/special-cases"},
 		},
 	}
 
@@ -363,6 +317,10 @@ func TestResolveReference_Embedded(t *testing.T) {
 			expected: &Schema{Anchor: "bar", Not: &Schema{Ref: "#/$defs/Y/oneOf/2"}},
 		},
 		{
+			ref:      "https://example.com/other.json#bar",
+			expected: &Schema{Anchor: "bar", Not: &Schema{Ref: "#/$defs/Y/oneOf/2"}},
+		},
+		{
 			ref: "other.json",
 			expected: &Schema{
 				ID: "other.json",
@@ -381,14 +339,6 @@ func TestResolveReference_Embedded(t *testing.T) {
 					},
 				},
 			},
-		},
-		{
-			ref:      "#/$defs/B/$defs/X/not",
-			expected: &Schema{Anchor: "bar", Not: &Schema{Ref: "#/$defs/Y/oneOf/2"}},
-		},
-		{
-			ref:      "#/$defs/B/$defs/Y/oneOf/1",
-			expected: &Schema{Type: TypeSet{TypeArray}, Items: &Schema{Ref: "#/$defs/veggie"}},
 		},
 		{
 			ref: "https://domain.tld/schema.json",
