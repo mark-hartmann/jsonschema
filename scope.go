@@ -161,3 +161,41 @@ func (s *Scope[T]) ParentResource() *Scope[T] {
 	}
 	return nil
 }
+
+// TreeNode represents a single node in a traced [Scope] tree. Each TreeNode
+// corresponds to one Scope and forms a tree mirroring the traversal structure.
+// It stores the parent/child relationship and the Scope.
+type TreeNode[T any] struct {
+	Scope    *Scope[T]
+	Parent   *TreeNode[T]
+	Children []*TreeNode[T]
+}
+
+// ScopeTree holds the full Scope traversal as a tree of TreeNodes. A [ScopeTree]
+// can best be populated using the [Walk] function, wrapping the [ScopeTree.Add] receiver
+// as the [MetaFunc].
+type ScopeTree[T any] struct {
+	nodes map[*Scope[T]]*TreeNode[T]
+	Root  *TreeNode[T]
+}
+
+// NewScopeTree returns a new ScopeTree instance.
+func NewScopeTree[T any]() *ScopeTree[T] {
+	return &ScopeTree[T]{nodes: make(map[*Scope[T]]*TreeNode[T])}
+}
+
+// Add inserts the scope to the tree, adding its node as a child of the parent
+// node or the tree root, if no parent exists.
+func (t *ScopeTree[T]) Add(scope *Scope[T]) {
+	n := &TreeNode[T]{Scope: scope, Children: []*TreeNode[T]{}}
+	t.nodes[scope] = n
+
+	if scope.Parent == nil {
+		t.Root = n
+		return
+	}
+
+	parentNode := t.nodes[scope.Parent]
+	parentNode.Children = append(parentNode.Children, n)
+	n.Parent = parentNode
+}
