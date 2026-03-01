@@ -65,8 +65,8 @@ func NewLocalLoader(root *Schema, next Loader) Loader {
 	prefetched := make(map[string]*Schema)
 	for s, identifiers := range ids {
 		if identifiers.BaseURI+"#" == identifiers.CanonResourcePointerURI {
-			prefetched[identifiers.BaseURI], _ = resolveRef(ResolveConfig{}, root,
-				getUnescapedPath(s), 0)
+			var rs *Schema
+			prefetched[identifiers.BaseURI], _, _ = fastResolve(root, &rs, getUnescapedPath(s), 0)
 		}
 	}
 	return LoaderFunc(func(ctx context.Context, uri *url.URL) (*Schema, error) {

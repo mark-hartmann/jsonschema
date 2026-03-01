@@ -11,88 +11,47 @@ import (
 type ResolveConfig struct {
 	Context context.Context
 	Loader  Loader
-
-	resource            *Schema
-	rootResource        *Schema
-	rootResourceLoader  Loader
-	resourceURI         *url.URL
-	computedIdentifiers map[string]Identifiers
 }
 
-func applyDefaults(config *ResolveConfig, resource *Schema) {
+var noLoader = LoaderFunc(func(_ context.Context, uri *url.URL) (*Schema, error) {
+	return nil, fmt.Errorf("no loader configured")
+})
+
+// ResolveReference resolves a JSON reference pointer against the provided Schema.
+// If the reference points to an external URI, the [Loader] is used.
+func ResolveReference(config ResolveConfig, ref string, resource *Schema) (*Schema, error) {
+	embedded := NewLocalLoader(resource, nil)
+	resourceURI, _ := url.Parse(resource.ID)
+	identifiers, err := ComputeIdentifiers(*resource)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to compute identifiers: %w", err)
+	}
+
 	if config.Context == nil {
 		config.Context = context.Background()
 	}
 
 	if config.Loader == nil {
-		config.Loader = LoaderFunc(func(_ context.Context, uri *url.URL) (*Schema, error) {
-			return nil, fmt.Errorf("no loader configured")
-		})
-	}
-
-	if config.resource == nil {
-		config.resource = resource
-	}
-
-	if config.resourceURI == nil {
-		config.resourceURI, _ = url.Parse(resource.ID)
-	}
-
-	if config.rootResource == nil {
-		config.rootResource = resource
-		config.rootResourceLoader = NewLocalLoader(resource, nil)
-		config.computedIdentifiers, _ = ComputeIdentifiers(*resource)
-	}
-}
-
-// ResolveReference resolves a JSON reference pointer against the provided Schema.
-// If the reference (or some node of it) points to an external URI, the loaders is
-// used.
-func ResolveReference(config ResolveConfig, ref string, resource *Schema) (*Schema, error) {
-	applyDefaults(&config, resource)
-
-	if resource.ID != "" {
-		config.resource = resource
-
-		uri, _ := url.Parse(resource.ID)
-		config.resourceURI = config.resourceURI.ResolveReference(uri)
-
-		// If ids are not computed or the resource ID is not embedded in the root
-		// schema resource!
-		if config.computedIdentifiers == nil || !isEmbedded(resource.ID, config.computedIdentifiers) {
-			config.computedIdentifiers, _ = ComputeIdentifiers(*resource)
-		}
+		config.Loader = noLoader
 	}
 
 	uri, _ := url.Parse(ref)
-	isPointerReference := len(ref) == 0 || len(ref) > 2 && ref[0] == '#' && ref[1] == '/'
 
 	var path []string
 	var refPath string
-	if isPointerReference {
+
+	// Check if it is a pointer reference; we can process it straight away using fastResolve.
+	if len(ref) == 0 || len(ref) > 2 && ref[0] == '#' && ref[1] == '/' {
+		// ref may be empty or contain #, so we simply use the parsed uri.
 		refPath = uri.Fragment
 	} else {
-		uri = config.resourceURI.ResolveReference(uri)
-		if isEmbedded(uri.String(), config.computedIdentifiers) {
-			var ids Identifiers
-
-			bURI, _ := url.Parse(uri.String())
-			bURI.Fragment = ""
-			for _, id := range config.computedIdentifiers {
-				if id.BaseURI == uri.String() {
-					ids = id
-					break
-				}
-			}
-
-			s, err := config.rootResourceLoader.Load(config.Context, uri)
+		uri = resourceURI.ResolveReference(uri)
+		if isEmbedded(uri.String(), identifiers) {
+			resource, err = embedded.Load(config.Context, uri)
 			if err != nil {
 				return nil, fmt.Errorf("unable to locate embedded resource: %w", err)
 			}
-
-			resource = s
-			config.resource = s
-			config.resourceURI, _ = url.Parse(ids.BaseURI)
 		} else {
 			s, err := config.Loader.Load(config.Context, uri)
 			if err != nil {
@@ -110,15 +69,21 @@ func ResolveReference(config ResolveConfig, ref string, resource *Schema) (*Sche
 
 	path = getUnescapedPath(refPath)
 	if err := ValidateReferencePointer(refPath); err != nil {
-		return nil, fmt.Errorf("invalid reference %s: %w", fmtPos(config, path, len(path)), err)
+		return nil, fmt.Errorf("invalid reference %s: %w", fmtPos(resourceURI, path, len(path)), err)
 	}
 
-	return resolveRef(config, config.resource, path, 0)
+	var res2 *Schema
+	s, _, err := fastResolve(resource, &res2, path, 0)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve %s: %w", fmtPos(resourceURI, path, len(path)), err)
+	}
+
+	return s, nil
 }
 
-func fmtPos(config ResolveConfig, path []string, pos int) string {
+func fmtPos(uri *url.URL, path []string, pos int) string {
 	var res string
-	if uriStr := config.resourceURI.String(); uriStr != "" {
+	if uriStr := uri.String(); uriStr != "" {
 		res = uriStr
 	} else {
 		res = "<root>"
@@ -139,33 +104,6 @@ func fmtPtrPosition(path []string, pos int) string {
 		}
 	}
 	return sb.String()
-}
-
-func resolveRef(config ResolveConfig, current *Schema, path []string, pos int) (*Schema, error) {
-	// Return if the current schema is not set, or we reached the end of
-	// the reference path without the schema having a reference itself.
-	if current == nil || len(path[pos:]) == 0 {
-		return current, nil
-	}
-
-	if current.ID != "" {
-		uri, _ := url.Parse(current.ID)
-		config.resource = current
-		config.resourceURI = config.resourceURI.ResolveReference(uri)
-	}
-
-	var res *Schema
-	s, pos, err := fastResolve(current, &res, path, pos)
-	if err != nil {
-		return nil, fmt.Errorf("failed to resolve %s: %w", fmtPos(config, path, len(path)), err)
-	}
-	if res != nil {
-		config.resource = res
-		uri, _ := url.Parse(current.ID)
-		config.resourceURI = config.resourceURI.ResolveReference(uri)
-	}
-
-	return s, err
 }
 
 // fastResolve follows the path until pos=len(path) or the path cannot be followed
