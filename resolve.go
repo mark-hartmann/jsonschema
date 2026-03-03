@@ -20,21 +20,16 @@ var noLoader = LoaderFunc(func(_ context.Context, uri *url.URL) (*Schema, error)
 // ResolveReference resolves a JSON reference pointer against the provided Schema.
 // If the reference points to an external URI, the [Loader] is used.
 func ResolveReference(config ResolveConfig, ref string, resource *Schema) (*Schema, error) {
-	embedded := NewLocalLoader(resource, nil)
-	resourceURI, _ := url.Parse(resource.ID)
-	identifiers, err := ComputeIdentifiers(*resource)
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to compute identifiers: %w", err)
-	}
-
 	if config.Context == nil {
 		config.Context = context.Background()
 	}
 
-	if config.Loader == nil {
-		config.Loader = noLoader
+	next := config.Loader
+	if next == nil {
+		next = noLoader
 	}
+	embedded := NewLocalLoader(resource, next)
+	resourceURI, _ := url.Parse(resource.ID)
 
 	uri, _ := url.Parse(ref)
 
@@ -47,17 +42,10 @@ func ResolveReference(config ResolveConfig, ref string, resource *Schema) (*Sche
 		refPath = uri.Fragment
 	} else {
 		uri = resourceURI.ResolveReference(uri)
-		if isEmbedded(uri.String(), identifiers) {
-			resource, err = embedded.Load(config.Context, uri)
-			if err != nil {
-				return nil, fmt.Errorf("unable to locate embedded resource: %w", err)
-			}
-		} else {
-			s, err := config.Loader.Load(config.Context, uri)
-			if err != nil {
-				return nil, fmt.Errorf("unable to locate non-embedded resource {\"$id\": %q}: %w", uri, err)
-			}
-			return ResolveReference(ResolveConfig{Context: config.Context, Loader: config.Loader}, uri.String(), s)
+		var err error
+		resource, err = embedded.Load(config.Context, uri)
+		if err != nil {
+			return nil, fmt.Errorf("unable to load using embedded loader: %w", err)
 		}
 
 		if uri.Path != "" {

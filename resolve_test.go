@@ -172,12 +172,12 @@ func TestResolveReference(t *testing.T) {
 		{
 			name:    "absolute uri with unknown anchor",
 			args:    args{ref: "https://example.net/abs.json#item", resource: root},
-			wantErr: `unable to locate embedded resource: unknown anchor "item" at "https://example.net/abs.json"`,
+			wantErr: `unable to load using embedded loader: unknown anchor "item" at "https://example.net/abs.json"`,
 		},
 		{
 			name:    "absolute uri not embedded",
 			args:    args{ref: "https://example.com", resource: root},
-			wantErr: `unable to locate non-embedded resource {"$id": "https://example.com"}: no loader configured`,
+			wantErr: `unable to load using embedded loader: failed to load non-embedded resource {"$id": "https://example.com"}: no loader configured`,
 		},
 		{
 			name: "existing subschema in array",
